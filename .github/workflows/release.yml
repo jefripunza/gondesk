@@ -1,0 +1,283 @@
+name: Build, Docker Push & Multi-OS Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semantic version bump type (patch, minor, major)"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  GOTOOLCHAIN: auto
+  CGO_ENABLED: "0"
+
+jobs:
+  # ============================================================================
+  # 1. Verify Code, Calculate Auto Semantic Version (XX.XX.XX) & Create Tag
+  # ============================================================================
+  version-and-release:
+    name: Auto Version & Create Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ">=1.24.0"
+          check-latest: true
+
+      - name: Run MyGo static analysis & unit tests
+        run: |
+          go tool mygo vet .
+          go test -v ./...
+
+      - name: Calculate next semantic version (XX.XX.XX)
+        id: semver
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          MANUAL_BUMP="${{ github.event.inputs.bump }}"
+
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_VER=$(jq -r '.version // "0.1.0"' mygo.json)
+            if [[ ! "$BASE_VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              BASE_VER="0.1.0"
+            fi
+            NEW_VERSION="$BASE_VER"
+          else
+            RAW_VER="${LATEST_TAG#v}"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$RAW_VER"
+
+            BUMP_TYPE="patch"
+            if [ -n "$MANUAL_BUMP" ]; then
+              BUMP_TYPE="$MANUAL_BUMP"
+            elif echo "$COMMIT_MSG" | grep -qiE '(#major|BREAKING CHANGE|^[a-z]+(\([^)]+\))?!:)'; then
+              BUMP_TYPE="major"
+            elif echo "$COMMIT_MSG" | grep -qiE '(#minor|^feat(\([^)]+\))?:)'; then
+              BUMP_TYPE="minor"
+            fi
+
+            case "$BUMP_TYPE" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              *)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          NEW_TAG="v${NEW_VERSION}"
+          echo "Calculated version: ${NEW_VERSION} (Tag: ${NEW_TAG})"
+          echo "version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push Git tag + GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.semver.outputs.tag }}
+          VERSION: ${{ steps.semver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "GonDesk $TAG" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+  # ============================================================================
+  # 2. Build Docker Image & Push to Docker Hub
+  # ============================================================================
+  docker:
+    name: Build & Push Docker Image
+    needs: version-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check Docker Hub credentials
+        id: creds
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
+            echo "has_creds=true" >> "$GITHUB_OUTPUT"
+            IMAGE_REPO="${DOCKERHUB_USERNAME}/gondesk"
+            echo "image_repo=${IMAGE_REPO}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::DOCKERHUB_USERNAME or DOCKERHUB_TOKEN secret is not set. Building Docker image without pushing to Docker Hub."
+            echo "has_creds=false" >> "$GITHUB_OUTPUT"
+            echo "image_repo=gondesk/gondesk" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to Docker Hub
+        if: steps.creds.outputs.has_creds == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image (Multi-Arch)
+        if: steps.creds.outputs.has_creds == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ needs.version-and-release.outputs.version }}
+          tags: |
+            ${{ steps.creds.outputs.image_repo }}:${{ needs.version-and-release.outputs.version }}
+            ${{ steps.creds.outputs.image_repo }}:latest
+
+      - name: Build Docker Image (Verification Only when Secrets Missing)
+        if: steps.creds.outputs.has_creds != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            VERSION=${{ needs.version-and-release.outputs.version }}
+          tags: |
+            gondesk:${{ needs.version-and-release.outputs.version }}
+
+  # ============================================================================
+  # 3. Build 3 Operating Systems (Linux, Windows, macOS) & Upload to Release Tag
+  # ============================================================================
+  build-os-binaries:
+    name: Build ${{ matrix.os_name }} Release Assets
+    needs: version-and-release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os_name: Linux
+            runner: ubuntu-latest
+            platforms: "linux/amd64,linux/arm64"
+          - os_name: Windows
+            runner: ubuntu-latest
+            platforms: "windows/amd64,windows/arm64"
+          - os_name: macOS
+            runner: macos-latest
+            platforms: "darwin/universal,darwin/arm64,darwin/amd64"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ">=1.24.0"
+          check-latest: true
+
+      - name: Install packaging tools (NSIS / zip)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nsis zip jq
+
+      - name: Stamp release version (${{ needs.version-and-release.outputs.version }}) in mygo.json
+        env:
+          VERSION: ${{ needs.version-and-release.outputs.version }}
+        run: |
+          jq --arg v "$VERSION" '.version = $v' mygo.json > mygo.tmp.json
+          mv mygo.tmp.json mygo.json
+          cat mygo.json
+
+      - name: Build packages with MyGo CLI (${{ matrix.os_name }})
+        run: |
+          go tool mygo build -platform "${{ matrix.platforms }}"
+
+      - name: Prepare downloadable archives & SHA256 checksums (${{ matrix.os_name }})
+        env:
+          VERSION: ${{ needs.version-and-release.outputs.version }}
+          OS_NAME: ${{ matrix.os_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-release
+
+          if [ "$OS_NAME" = "Linux" ]; then
+            # Copy Linux .tar.gz, .deb, and .rpm packages generated by mygo build
+            find build -maxdepth 2 -type f \( -name "*.tar.gz" -o -name "*.deb" -o -name "*.rpm" \) -exec cp {} dist-release/ \;
+          elif [ "$OS_NAME" = "Windows" ]; then
+            # Copy Windows NSIS setup installers if generated
+            find build -maxdepth 2 -type f -name "*-setup-*.exe" -exec cp {} dist-release/ \;
+            # Also package portable .zip archives for Windows amd64 & arm64
+            for arch in amd64 arm64; do
+              if [ -d "build/windows-${arch}" ]; then
+                (cd "build/windows-${arch}" && zip -r "../../dist-release/gondesk-${VERSION}-windows-${arch}.zip" .)
+              fi
+            done
+          elif [ "$OS_NAME" = "macOS" ]; then
+            # Copy macOS .dmg disk images generated by mygo build
+            find build -maxdepth 2 -type f -name "*.dmg" -exec cp {} dist-release/ \;
+            # Also create a zipped .app bundle for universal macOS
+            if [ -d "build/darwin-universal/GonDesk.app" ]; then
+              (cd "build/darwin-universal" && ditto -c -k --sequesterRsrc --keepParent "GonDesk.app" "../../dist-release/GonDesk-${VERSION}-macos-universal.app.zip")
+            fi
+          fi
+
+          cd dist-release
+          shasum -a 256 * > "SHA256SUMS-${OS_NAME}-${VERSION}.txt"
+          ls -lh
+
+      - name: Upload ${{ matrix.os_name }} assets to GitHub Release Tag (${{ needs.version-and-release.outputs.tag }})
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version-and-release.outputs.tag }}
+        run: |
+          gh release upload "$TAG" dist-release/* --repo "$GITHUB_REPOSITORY" --clobber
+

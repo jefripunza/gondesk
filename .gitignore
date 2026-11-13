@@ -1,0 +1,8 @@
+/build/
+/.mygo/
+/data/
+*.db
+*.db-shm
+*.db-wal
+mygo_windows_*.syso
+

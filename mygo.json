@@ -1,0 +1,15 @@
+{
+  "name": "GonDesk",
+  "slug": "gondesk",
+  "identifier": "com.gondesk.app",
+  "version": "0.1.0",
+  "license": "MIT",
+  "copyright": "© 2026 GonDesk Contributors",
+  "out": "build",
+  "linux": {
+    "webview": false,
+    "comment": "Cross-Platform Remote Desktop & Single-Port HTTPS/TURN Bridge",
+    "categories": ["Network", "RemoteAccess", "Utility"],
+    "command": "gondesk"
+  }
+}

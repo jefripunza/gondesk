@@ -1,0 +1,27 @@
+services:
+  gondesk-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gondesk:latest
+    container_name: gondesk-bridge
+    restart: unless-stopped
+    ports:
+      # Single Port for HTTPS API, WSS Signaling, TURNS (TCP/TLS), and TURN/STUN (UDP)
+      - "8443:8443/tcp"
+      - "8443:8443/udp"
+    environment:
+      - GONDESK_MODE=server
+      - GONDESK_HEADLESS=true
+      - GONDESK_HOST=0.0.0.0
+      - GONDESK_PORT=8443
+      - GONDESK_PUBLIC_IP=${GONDESK_PUBLIC_IP:-127.0.0.1}
+      - GONDESK_TURN_REALM=${GONDESK_TURN_REALM:-gondesk.local}
+      - GONDESK_TLS=true
+      - GONDESK_DATA_DIR=/data
+    volumes:
+      - gondesk_data:/data
+
+volumes:
+  gondesk_data:
+

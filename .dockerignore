@@ -1,0 +1,24 @@
+# Git & CI
+.git
+.gitignore
+.github
+.agents
+
+# Build outputs & local state
+.mygo/
+build/
+dist/
+data/
+certs/
+*.db
+*.db-shm
+*.db-wal
+*.exe
+*.dmg
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+*.log
+.DS_Store
+
