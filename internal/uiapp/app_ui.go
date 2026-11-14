@@ -52,6 +52,11 @@ type AppUI struct {
 	NewPeerURL       string
 	NewPeerURLError  string
 	NewPeerID        string
+	NewPeerIDPart1   string
+	NewPeerIDPart2   string
+	NewPeerIDPart3   string
+	peerIDReqFocus   int
+	peerIDFocused    bool
 	NewPeerAlias     string
 
 	// Delete confirmation modal state
@@ -273,4 +278,42 @@ func isValidDomainOrHostname(h string) bool {
 	}
 
 	return true
+}
+
+// FilterOnlyDigits returns only ASCII digits '0'-'9' from s, truncated to maxLen if maxLen > 0.
+func FilterOnlyDigits(s string, maxLen int) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			if maxLen > 0 && b.Len() >= maxLen {
+				break
+			}
+		}
+	}
+	return b.String()
+}
+
+// syncPeerID synchronizes a.NewPeerID with its 3 segments (Part1, Part2, Part3).
+// If a.NewPeerID was modified externally, it splits it into 3 segments.
+// If any part was modified in the UI, it merges them into a.NewPeerID.
+func (a *AppUI) syncPeerID() {
+	combined := a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
+	if a.NewPeerID != combined {
+		clean := FilterOnlyDigits(a.NewPeerID, 9)
+		if len(clean) <= 3 {
+			a.NewPeerIDPart1 = clean
+			a.NewPeerIDPart2 = ""
+			a.NewPeerIDPart3 = ""
+		} else if len(clean) <= 6 {
+			a.NewPeerIDPart1 = clean[0:3]
+			a.NewPeerIDPart2 = clean[3:]
+			a.NewPeerIDPart3 = ""
+		} else {
+			a.NewPeerIDPart1 = clean[0:3]
+			a.NewPeerIDPart2 = clean[3:6]
+			a.NewPeerIDPart3 = clean[6:]
+		}
+		a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
+	}
 }

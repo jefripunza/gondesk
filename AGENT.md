@@ -81,7 +81,26 @@ Setiap kolom input URL (terutama pada modal dialog penambahan desk) **WAJIB** me
 
 ---
 
-## 🚫 3. Larangan Menampilkan Kembali Elemen yang Dihapus Pengguna
+## 🔢 3. Aturan Input Kolom GonDesk ID (Wajib Angka & Spacing Style Murni)
+
+Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJIB** menerapkan aturan berikut:
+
+1. **Wajib Hanya Angka (Numeric Only)**:
+   - Nilai input wajib strictly berupa angka (`0`-`9`).
+   - Karakter non-angka (huruf, spasi, simbol) wajib otomatis dibuang/difilter seketika (menggunakan utilitas `FilterOnlyDigits(s, maxLen)`).
+2. **Spacing Setiap 3 Digit Berupa Style Murni (Bukan Karakter Spasi `" "`)**:
+   - Tampilan visual setiap 3 digit harus memiliki jeda/jarak yang menyerupai spasi (misalnya `612  840  193`).
+   - **DILARANG KERAS** menyisipkan karakter spasi ASCII (`" "`) ke dalam nilai variabel string input!
+   - Spasi antar digit harus berupa **style layout murni** (misalnya `ui.Row` dengan `Gap(14)` yang menampung 3 sub-input `TextInputBase` tanpa border).
+   - Nilai variabel `NewPeerID` yang disimpan wajib hanya angka murni tanpa karakter spasi (misal: `"612840193"`).
+3. **Navigasi & Autoflow Input**:
+   - Saat pengguna mengetik hingga 3 digit pada segmen 1, fokus kursor otomatis berpindah ke segmen 2, dan dari segmen 2 ke segmen 3.
+   - Saat tombol Backspace ditekan pada segmen kosong, fokus kursor otomatis kembali ke segmen sebelumnya.
+   - Operasi paste (tempel teks) secara otomatis memfilter hanya angka dan memecahnya ke masing-masing segmen secara proporsional.
+
+---
+
+## 🚫 4. Larangan Menampilkan Kembali Elemen yang Dihapus Pengguna
 - Jika pengguna telah meminta menghapus suatu elemen antarmuka, agen **DILARANG KERAS** memunculkan atau menuliskan kembali elemen tersebut di siklus modifikasi selanjutnya.
 - Elemen-elemen yang **WAJIB TETAP DIHAPUS**:
   1. **Judul teks `"Discovered & Saved Desks"`** di atas daftar filter tabs.

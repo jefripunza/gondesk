@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -109,6 +110,53 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if ttModalValid.HasText(expectedErrMsg) {
 		t.Fatalf("expected red error text to disappear after valid URL; got texts: %v", ttModalValid.Texts())
 	}
+
+	// Verify GonDesk ID field: must be numeric digits only, styled with gap, zero space character in value
+	if !ttModalValid.HasText("GonDesk ID (e.g. 612 840 193)") {
+		t.Fatalf("expected modal to show GonDesk ID placeholder; got texts: %v", ttModalValid.Texts())
+	}
+	// Test FilterOnlyDigits
+	if filtered := uiapp.FilterOnlyDigits("612abc840xyz193", 9); filtered != "612840193" {
+		t.Fatalf("expected '612840193', got %q", filtered)
+	}
+	if filtered := uiapp.FilterOnlyDigits("816 692 488", 9); filtered != "816692488" {
+		t.Fatalf("expected '816692488', got %q", filtered)
+	}
+	// Enter ID into appUI
+	appUI.NewPeerID = "612840193"
+	appUI.NewPeerAlias = "Linux-Workstation"
+	ttModalValid.Frame()
+	if appUI.NewPeerIDPart1 != "612" || appUI.NewPeerIDPart2 != "840" || appUI.NewPeerIDPart3 != "193" {
+		t.Fatalf("expected ID parts '612', '840', '193'; got %q %q %q",
+			appUI.NewPeerIDPart1, appUI.NewPeerIDPart2, appUI.NewPeerIDPart3)
+	}
+	if strings.Contains(appUI.NewPeerID, " ") {
+		t.Fatalf("NewPeerID must not contain space characters; got %q", appUI.NewPeerID)
+	}
+	// Save the desk with the new ID
+	ttModalValid.Click("Save Desk")
+	ttModalValid.Frame()
+	if appUI.AddPeerModalOpen {
+		t.Fatalf("expected modal to close after saving valid desk")
+	}
+	// Verify peer saved in store with normalized ID
+	peers, err := store.ListPeers()
+	if err != nil {
+		t.Fatalf("ListPeers: %v", err)
+	}
+	found := false
+	for _, p := range peers {
+		if p.DeskID == "612 840 193" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected peer '612 840 193' in peers list: %v", peers)
+	}
+
+	// Reopen modal to verify Cancel and backdrop behavior
+	appUI.AddPeerModalOpen = true
 
 	// Click outside the modal dialog (at top-left backdrop coordinate)
 	ttModal.ClickAt(10, 10)
