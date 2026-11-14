@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"encoding/base64"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -371,4 +372,81 @@ func strconvFormat(f float32) string {
 		return "0.95"
 	}
 	return "0.5"
+}
+
+func TestSessionAcceptDoesNotAddHostDummyCursor(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Create an outgoing session
+	mgr.mu.Lock()
+	mgr.sessions = append(mgr.sessions, &ActiveSession{
+		SessionUUID: "session-out-test",
+		PeerDeskID:  "170 095 453",
+		PeerAlias:   "anjay",
+		Direction:   "outgoing",
+		Status:      "connecting",
+	})
+	mgr.mu.Unlock()
+
+	// Simulate host sending session_accept
+	acceptMsg := server.SignalMessage{
+		Type:        "session_accept",
+		SessionUUID: "session-out-test",
+		FromDeskID:  "170 095 453",
+		FromAlias:   "anjay",
+	}
+	mgr.HandleSignal(acceptMsg)
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	s := sessions[0]
+	if s.Status != "connected" {
+		t.Fatalf("expected status connected, got %s", s.Status)
+	}
+
+	// Verify that host is NOT added as a static participant cursor at (0.5, 0.5)
+	if s.Participants != nil {
+		if cur, exists := s.Participants["170 095 453"]; exists {
+			t.Fatalf("host 'anjay' should not be placed as a dummy static participant cursor, got %v", cur)
+		}
+	}
+}
+
+func TestManagerFrameSignal(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	mgr.mu.Lock()
+	mgr.sessions = append(mgr.sessions, &ActiveSession{
+		SessionUUID: "session-frame-test",
+		PeerDeskID:  "170 095 453",
+		PeerAlias:   "anjay",
+		Direction:   "outgoing",
+		Status:      "connected",
+	})
+	mgr.mu.Unlock()
+
+	mockJPEG := GenerateSyntheticDesktopFrame(640, 360, DesktopInfo{HostAlias: "anjay"})
+	framePayload := base64.StdEncoding.EncodeToString(mockJPEG)
+
+	frameMsg := server.SignalMessage{
+		Type:        "frame",
+		SessionUUID: "session-frame-test",
+		FromDeskID:  "170 095 453",
+		Payload:     framePayload,
+	}
+	mgr.HandleSignal(frameMsg)
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session")
+	}
+	s := sessions[0]
+	if len(s.LatestFrame) == 0 {
+		t.Fatalf("expected LatestFrame to be populated")
+	}
+	if s.FrameSeq != 1 {
+		t.Fatalf("expected FrameSeq to be 1, got %d", s.FrameSeq)
+	}
 }

@@ -25,6 +25,10 @@ type ActiveSessionWindow struct {
 	NotchOffsetX  float32
 	NotchDragging bool
 	FileStatus    string
+	CanvasW       float32
+	CanvasH       float32
+	FrameBitmap   *ui.Bitmap
+	LastFrameSeq  uint64
 }
 
 // RenderConnectingView renders a pure black screen with "Connecting ..." centered in white text.
@@ -162,6 +166,15 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 			})
 		})
 
+		// Check for incoming frame updates from host
+		if activeSess != nil && activeSess.FrameSeq != sw.LastFrameSeq && len(activeSess.LatestFrame) > 0 {
+			bmp, err := ui.DecodeBitmap(activeSess.LatestFrame)
+			if err == nil {
+				sw.FrameBitmap = bmp
+				sw.LastFrameSeq = activeSess.FrameSeq
+			}
+		}
+
 		// File transfer status message banner
 		if sw.FileStatus != "" {
 			ui.Row(c.Key("file-status-row")).Justify(ui.Center).Margin(2, 0).Children(func() {
@@ -177,19 +190,37 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 		// Capture mouse movements and clicks to send to remote host
 		canvas.HandleInput(func(ev ui.InputEvent) bool {
 			if a.Manager != nil && sw.SessionUUID != "" {
-				normX := ev.X
-				normY := ev.Y
-				if normX > 1.0 {
-					normX /= 1024
+				cw := sw.CanvasW
+				if cw <= 1.0 {
+					cw = 1024
 				}
-				if normY > 1.0 {
-					normY /= 640
+				ch := sw.CanvasH
+				if ch <= 1.0 {
+					ch = 640
+				}
+				normX := ev.X / cw
+				normY := ev.Y / ch
+				if normX < 0 {
+					normX = 0
+				} else if normX > 1 {
+					normX = 1
+				}
+				if normY < 0 {
+					normY = 0
+				} else if normY > 1 {
+					normY = 1
 				}
 				switch ev.Kind {
 				case ui.InputPointerMove:
 					a.Manager.SendMouseMove(sw.SessionUUID, normX, normY)
+					if sw.Win != nil {
+						sw.Win.Invalidate()
+					}
 				case ui.InputPointerDown:
 					a.Manager.SendMouseClick(sw.SessionUUID, normX, normY, ev.Button)
+					if sw.Win != nil {
+						sw.Win.Invalidate()
+					}
 				}
 			}
 			return true
@@ -197,14 +228,19 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 
 		// Draw stream canvas and all active collaborative remote cursors (N participants)
 		canvas.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			// 1. Draw subtle grid / viewport background
-			for gy := r.Y; gy < r.Y+r.H; gy += 48 {
-				line := (&ui.Path{}).MoveTo(r.X, gy).LineTo(r.X+r.W, gy)
-				p.StrokePath(line, 0.5, ui.Hex("#0E0E18"))
-			}
+			sw.CanvasW = r.W
+			sw.CanvasH = r.H
 
-			// Simulated viewport text indicator
-			p.Text(r.X+16, r.Y+24, "GonDesk Encrypted Remote Stream (TLS 1.3 + Pion TURNS)", 12, ui.Hex("#475569"))
+			// 1. Draw live screen capture frame if available, else subtle grid placeholder
+			if sw.FrameBitmap != nil {
+				p.Image(sw.FrameBitmap, r, ui.FillBox)
+			} else {
+				for gy := r.Y; gy < r.Y+r.H; gy += 48 {
+					line := (&ui.Path{}).MoveTo(r.X, gy).LineTo(r.X+r.W, gy)
+					p.StrokePath(line, 0.5, ui.Hex("#0E0E18"))
+				}
+				p.Text(r.X+16, r.Y+24, "GonDesk Encrypted Remote Stream (TLS 1.3 + Pion TURNS)", 12, ui.Hex("#475569"))
+			}
 
 			// 2. Draw all collaborative remote participant cursors (N users dynamically)
 			if activeSess != nil && activeSess.Participants != nil {
@@ -275,9 +311,11 @@ func (a *AppUI) OpenRemoteWindow(target, alias string) *mygo.Window {
 	sw, exists := a.ActiveWindows[norm]
 	if !exists {
 		sw = &ActiveSessionWindow{
-			DeskID: target,
-			Alias:  alias,
-			Status: "connecting",
+			DeskID:  target,
+			Alias:   alias,
+			Status:  "connecting",
+			CanvasW: 1024,
+			CanvasH: 640,
 		}
 		a.ActiveWindows[norm] = sw
 	}
@@ -369,7 +407,7 @@ func (a *AppUI) handleWindowClosed(normDeskID string) {
 	a.ReloadFromDB()
 }
 
-// IsDeskConnected reports whether an active window or connection session exists for the given desk ID.
+// IsDeskConnected reports whether an active window or outgoing connection session exists for the given desk ID.
 func (a *AppUI) IsDeskConnected(deskID string) bool {
 	norm := database.NormalizeDeskID(deskID)
 	if a.ActiveWindows != nil {
@@ -380,7 +418,7 @@ func (a *AppUI) IsDeskConnected(deskID string) bool {
 	if a.Manager != nil {
 		_, _, _, _, sessions := a.Manager.Snapshot()
 		for _, s := range sessions {
-			if database.NormalizeDeskID(s.PeerDeskID) == norm && (s.Status == "connected" || s.Status == "connecting") {
+			if s.Direction == "outgoing" && database.NormalizeDeskID(s.PeerDeskID) == norm && (s.Status == "connected" || s.Status == "connecting") {
 				return true
 			}
 		}

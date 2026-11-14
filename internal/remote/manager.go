@@ -3,6 +3,7 @@ package remote
 import (
 	"bytes"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,6 +76,8 @@ type ActiveSession struct {
 	Participants    map[string]*RemoteCursor
 	LastInput       string
 	FrameTick       int
+	LatestFrame     []byte
+	FrameSeq        uint64
 	directWS        *websocket.Conn
 }
 
@@ -102,16 +105,23 @@ type Manager struct {
 	turnMappedAddr string
 	incoming       *IncomingPrompt
 	sessions       []*ActiveSession
+	screenEngine   *ScreenCaptureEngine
 }
 
 // NewManager creates a new remote session manager.
 func NewManager(cfg *config.Config, store *database.Store, node *server.UnifiedNode, onChange func()) *Manager {
 	return &Manager{
-		Cfg:      cfg,
-		Store:    store,
-		Node:     node,
-		OnChange: onChange,
+		Cfg:          cfg,
+		Store:        store,
+		Node:         node,
+		OnChange:     onChange,
+		screenEngine: NewScreenCaptureEngine(),
 	}
+}
+
+// ScreenEngine returns the capture engine associated with the Manager.
+func (m *Manager) ScreenEngine() *ScreenCaptureEngine {
+	return m.screenEngine
 }
 
 // StartBridgeLink connects this Desktop node to the configured Bridge Server over 1 HTTPS/WSS port
@@ -265,17 +275,6 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 			if s.Participants == nil {
 				s.Participants = make(map[string]*RemoteCursor)
 			}
-			if _, ok := s.Participants[msg.FromDeskID]; !ok {
-				s.Participants[msg.FromDeskID] = &RemoteCursor{
-					DeskID:     msg.FromDeskID,
-					Alias:      s.PeerAlias,
-					Color:      GetCursorColor(len(s.Participants)),
-					NormX:      0.5,
-					NormY:      0.5,
-					LastAction: "connected",
-					UpdatedAt:  time.Now(),
-				}
-			}
 			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Connected to %s via Single-Port HTTPS + TURN", time.Now().Format("15:04:05"), msg.FromDeskID))
 		}
 		m.mu.Unlock()
@@ -338,6 +337,22 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 		m.mu.Unlock()
 		m.notify()
 
+	case "frame":
+		rawBytes, err := base64.StdEncoding.DecodeString(msg.Payload)
+		if err == nil && len(rawBytes) > 0 {
+			m.mu.Lock()
+			for _, s := range m.sessions {
+				if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+					continue
+				}
+				s.LatestFrame = rawBytes
+				s.FrameSeq++
+				s.FrameTick++
+			}
+			m.mu.Unlock()
+			m.notify()
+		}
+
 	case "mouse_move", "mouse_click":
 		var ev struct {
 			NormX  float32 `json:"norm_x"`
@@ -380,6 +395,18 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 				s.FrameTick++
 			} else {
 				cur.LastAction = "move"
+			}
+
+			// Broadcast multi-cursor movement to any other participants in this incoming session
+			if s.Direction == "incoming" {
+				for pID := range s.Participants {
+					if pID == msg.FromDeskID {
+						continue
+					}
+					forwardMsg := msg
+					forwardMsg.ToDeskID = pID
+					go m.sendSessionSignal(s.SessionUUID, forwardMsg)
+				}
 			}
 		}
 		m.mu.Unlock()
@@ -714,6 +741,69 @@ func (m *Manager) acceptIncomingSession(sessionUUID, fromDeskID, fromAlias strin
 	}
 	m.sendReplySignal(reply)
 	m.notify()
+
+	// Start desktop screen capture & frame streaming loop to remote client(s)
+	go m.startHostStreamLoop(sessionUUID, fromDeskID)
+}
+
+func (m *Manager) startHostStreamLoop(sessionUUID, toDeskID string) {
+	ticker := time.NewTicker(66 * time.Millisecond) // ~15 FPS
+	defer ticker.Stop()
+
+	for range ticker.C {
+		m.mu.Lock()
+		var active bool
+		var participantCount int
+		var recipientIDs []string
+		for _, s := range m.sessions {
+			if s.SessionUUID == sessionUUID && s.Status == "connected" {
+				active = true
+				if s.Participants != nil {
+					participantCount = len(s.Participants)
+					for pID := range s.Participants {
+						recipientIDs = append(recipientIDs, pID)
+					}
+				}
+				break
+			}
+		}
+		m.mu.Unlock()
+
+		if !active {
+			return
+		}
+
+		st, _ := m.Store.GetSettings()
+		info := DesktopInfo{
+			HostDeskID:       st.DeskID,
+			HostAlias:        st.Alias,
+			ParticipantCount: max(1, participantCount),
+			Timestamp:        time.Now(),
+		}
+
+		frameBytes, err := m.screenEngine.CaptureFrame(info)
+		if err != nil || len(frameBytes) == 0 {
+			continue
+		}
+
+		payload := base64.StdEncoding.EncodeToString(frameBytes)
+		if len(recipientIDs) == 0 {
+			recipientIDs = []string{toDeskID}
+		}
+
+		for _, rID := range recipientIDs {
+			msg := server.SignalMessage{
+				Type:        "frame",
+				SessionUUID: sessionUUID,
+				FromDeskID:  st.DeskID,
+				FromAlias:   st.Alias,
+				ToDeskID:    rID,
+				Payload:     payload,
+				Timestamp:   time.Now().Format("15:04:05"),
+			}
+			m.sendSessionSignal(sessionUUID, msg)
+		}
+	}
 }
 
 // RejectIncoming declines the pending incoming connection request.
@@ -937,6 +1027,7 @@ func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
 			Timestamp:   time.Now().Format("15:04:05"),
 		})
 	}
+	m.notify()
 }
 
 // SendMouseClick broadcasts a normalized mouse click event for multi-cursor collaboration.

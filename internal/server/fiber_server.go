@@ -213,8 +213,9 @@ func (n *UnifiedNode) registerRoutes() {
 		}
 		st, _ := n.Store.GetSettings()
 		isLocalSelf := database.NormalizeDeskID(req.DeskID) == database.NormalizeDeskID(st.DeskID)
+		_ = isLocalSelf
 		var peer *database.PeerRecord
-		if !isLocalSelf || n.Cfg.IsServerMode() {
+		if n.Cfg.IsServerMode() {
 			var err error
 			peer, err = n.Store.UpsertPeer(req.DeskID, req.Alias, req.Hostname, req.OS, req.EndpointURL, true)
 			if err != nil {
@@ -283,8 +284,9 @@ func (n *UnifiedNode) registerRoutes() {
 
 		st, _ := n.Store.GetSettings()
 		isLocalSelf := database.NormalizeDeskID(deskID) == database.NormalizeDeskID(st.DeskID)
+		_ = isLocalSelf
 		remoteEndpoint := c.Query("endpoint_url")
-		if !isLocalSelf || n.Cfg.IsServerMode() {
+		if n.Cfg.IsServerMode() {
 			_, _ = n.Store.UpsertPeer(deskID, alias, "", runtime.GOOS+"/"+runtime.GOARCH, remoteEndpoint, true)
 		}
 
@@ -294,7 +296,7 @@ func (n *UnifiedNode) registerRoutes() {
 				delete(n.clients, deskID)
 			}
 			n.clientsMu.Unlock()
-			if !isLocalSelf || n.Cfg.IsServerMode() {
+			if n.Cfg.IsServerMode() {
 				_, _ = n.Store.UpsertPeer(deskID, alias, "", "", "", false)
 			}
 			_ = c.Close()

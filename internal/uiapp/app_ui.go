@@ -76,6 +76,9 @@ type AppUI struct {
 	Peers       []database.PeerRecord
 	SessionLogs []database.SessionLog
 	TurnCreds   []database.TurnCredential
+
+	// Host desktop shadow cursor overlay window for incoming remote sessions
+	HostOverlayWin *mygo.Window
 }
 
 // NewAppUI initializes the UI state from SQLite and Configuration.
@@ -138,6 +141,7 @@ func (a *AppUI) NotifyChanged() {
 	if a.Win != nil {
 		a.Win.Update(func() {
 			a.ReloadFromDB()
+			a.UpdateHostOverlay()
 		})
 	}
 }

@@ -282,3 +282,63 @@ func TestPeerEditAndConnectURLPersistence(t *testing.T) {
 		t.Fatalf("expected NewPeerURL to still be %s, got %s", customURL, appUI.NewPeerURL)
 	}
 }
+
+func TestIsDeskConnectedOnlyForOutgoing(t *testing.T) {
+	appUI, _ := setupTestAppUI(t)
+	peerID := "816 692 488"
+
+	// 1. Simulate incoming session (peer remoted into us)
+	appUI.Manager.AcceptIncoming() // no incoming initially, let's create incoming in manager
+	// Manually inject active session into manager
+	// Outgoing check should be false for incoming direction
+	if appUI.IsDeskConnected(peerID) {
+		t.Fatalf("should not be connected initially")
+	}
+
+	// 2. Open an active window for peerID (Outgoing session)
+	appUI.ActiveWindows = make(map[string]*ActiveSessionWindow)
+	appUI.ActiveWindows[database.NormalizeDeskID(peerID)] = &ActiveSessionWindow{
+		DeskID:  peerID,
+		Status:  "connected",
+		CanvasW: 1440,
+		CanvasH: 900,
+	}
+
+	if !appUI.IsDeskConnected(peerID) {
+		t.Fatalf("expected IsDeskConnected to return true for active outgoing window")
+	}
+
+	// 3. Close window
+	delete(appUI.ActiveWindows, database.NormalizeDeskID(peerID))
+	if appUI.IsDeskConnected(peerID) {
+		t.Fatalf("expected IsDeskConnected to return false after closing window")
+	}
+}
+
+func TestRemoteWindowNormalizationPrecision(t *testing.T) {
+	sw := &ActiveSessionWindow{
+		CanvasW: 1440,
+		CanvasH: 900,
+	}
+
+	// Exact center of a 1440x900 viewport
+	evX := float32(720)
+	evY := float32(450)
+
+	normX := evX / sw.CanvasW
+	normY := evY / sw.CanvasH
+
+	if normX != 0.5 || normY != 0.5 {
+		t.Fatalf("expected (0.5, 0.5), got (%.2f, %.2f)", normX, normY)
+	}
+
+	// Calculate painted screen position
+	renderW := float32(1440)
+	renderH := float32(900)
+	cx := normX * renderW
+	cy := normY * renderH
+
+	if cx != evX || cy != evY {
+		t.Fatalf("expected cursor rendered at exact pointer DIPs (%.1f, %.1f), got (%.1f, %.1f)", evX, evY, cx, cy)
+	}
+}

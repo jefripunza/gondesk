@@ -141,6 +141,9 @@ func (s *Store) ensureDefaults(defaultPort int, defaultBridgeURL string) error {
 		_ = s.DB.Create(&cred).Error
 	}
 
+	// Clean up any historical ghost peers inadvertently created by incoming signals in desktop mode
+	_ = s.DB.Where("endpoint_url = '' AND connection_count = 0 AND is_favorite = 0").Delete(&PeerRecord{}).Error
+
 	return nil
 }
 
