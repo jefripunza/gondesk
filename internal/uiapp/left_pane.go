@@ -13,7 +13,7 @@ import (
 )
 
 func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
-	ui.Scroll(c.Key("left-pane-scroll")).Fill().Padding(18).Gap(16).Background(t.Surface).Children(func() {
+	ui.Scroll(c.Key("left-pane-scroll")).Fill().MinWidth(280).MaxWidth(490).Padding(18).Gap(16).Background(t.Surface).Children(func() {
 		// 1. AnyDesk "This Desk / Your Address" Card
 		ui.Column(c).Padding(16).Gap(10).Radius(10).
 			Background(t.Background).Border(1, t.Border).
@@ -36,15 +36,6 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 					}
 				})
 			})
-
-		// Nilai lebar left_pane di bawah card
-		widthVal := a.LeftPaneWidth
-		if widthVal <= 0 {
-			widthVal = 340
-		}
-		ui.Row(c).Justify(ui.Center).Children(func() {
-			ui.Textf(c, "%.0f px", widthVal).FontSize(13).TextColor(t.TextMuted)
-		})
 	})
 }
 

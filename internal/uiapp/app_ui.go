@@ -166,11 +166,21 @@ func (a *AppUI) View(c *ui.Context) {
 }
 
 func (a *AppUI) renderDesktopMainSplit(c *ui.Context, t *ui.Theme) {
+	if a.LeftPaneWidth < 280 {
+		a.LeftPaneWidth = 280
+	} else if a.LeftPaneWidth > 490 {
+		a.LeftPaneWidth = 490
+	}
 	ui.Split(c, &a.LeftPaneWidth, func() {
 		a.renderLeftThisDeskPane(c, t)
 	}, func() {
 		a.renderRightRemoteDeskPane(c, t)
 	}).SplitReset(340).Grow(1).FillWidth()
+	if a.LeftPaneWidth < 280 {
+		a.LeftPaneWidth = 280
+	} else if a.LeftPaneWidth > 490 {
+		a.LeftPaneWidth = 490
+	}
 }
 
 // CleanURL normalizes a URL or host string:

@@ -44,8 +44,43 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if tt.HasText("Discovered & Saved Desks") {
 		t.Fatalf("expected 'Discovered & Saved Desks' header to be completely removed from UI; got texts: %v", tt.Texts())
 	}
-	if !tt.HasText("340 px") {
-		t.Fatalf("expected left_pane to render width '340 px', got texts: %v", tt.Texts())
+	if tt.HasText("340 px") || tt.HasText("280 px") || tt.HasText("490 px") || tt.HasText("81 px") {
+		t.Fatalf("expected width indicator text to be removed; got texts: %v", tt.Texts())
+	}
+
+	// Verify LeftPaneWidth is clamped to minimum 280px and maximum 490px
+	appUI.LeftPaneWidth = 81
+	ttClamp := ui.NewTester(appUI.View, 1120, 720)
+	ttClamp.Frame()
+	if appUI.LeftPaneWidth < 280 {
+		t.Fatalf("expected LeftPaneWidth to be clamped to at least 280, got %v", appUI.LeftPaneWidth)
+	}
+
+	// Verify dragging divider cannot shrink left pane below 280px
+	ttClamp.Press(appUI.LeftPaneWidth, 200)
+	ttClamp.Move(150, 200)
+	ttClamp.Move(50, 200)
+	ttClamp.Release(50, 200)
+	ttClamp.Frame()
+	if appUI.LeftPaneWidth < 280 {
+		t.Fatalf("expected LeftPaneWidth after drag to be clamped to >= 280, got %v", appUI.LeftPaneWidth)
+	}
+
+	// Verify expanding left pane past 490px is clamped to maximum 490px
+	ttClamp.Press(appUI.LeftPaneWidth, 200)
+	ttClamp.Move(400, 200)
+	ttClamp.Move(600, 200)
+	ttClamp.Release(600, 200)
+	ttClamp.Frame()
+	if appUI.LeftPaneWidth > 490 {
+		t.Fatalf("expected LeftPaneWidth to be clamped to at most 490, got %v", appUI.LeftPaneWidth)
+	}
+
+	appUI.LeftPaneWidth = 750
+	ttClampMax := ui.NewTester(appUI.View, 1120, 720)
+	ttClampMax.Frame()
+	if appUI.LeftPaneWidth > 490 {
+		t.Fatalf("expected LeftPaneWidth to be clamped to 490 on initial frame, got %v", appUI.LeftPaneWidth)
 	}
 
 	// Verify connecting via Name (optional) + URL (http/https required) adds to Discovered & Saved Desks list

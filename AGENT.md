@@ -165,7 +165,19 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧪 11. Prosedur Verifikasi Sebelum Commit
+## 📐 12. Batasan Rentang Lebar Split Pane (`ui.Split`)
+
+1. **Batas Rentang Lebar Left Pane (Min 280px, Max 490px)**:
+   - Panel kiri (`left_pane`) yang dapat di-resize menggunakan `ui.Split` **WAJIB dibatasi dengan rentang 280px s.d. 490px** (`mentok minimal 280px, maksimal 490px`).
+   - Lebar panel kiri dilarang mengecil di bawah 280px agar konten (kartu *Your Address*, 9 digit ID, tombol) tidak terhimpit menjadi teks vertikal per karakter.
+   - Lebar panel kiri dilarang membesar melebihi 490px agar tidak mendominasi layout desktop remote desks.
+   - Terapkan pembatasan clamping pada nilai split (`if a.LeftPaneWidth < 280 { a.LeftPaneWidth = 280 } else if a.LeftPaneWidth > 490 { a.LeftPaneWidth = 490 }`) serta atribut `.MinWidth(280).MaxWidth(490)` pada elemen root scroll panel kiri.
+2. **Larangan Menampilkan Nilai Ukuran Sementara**:
+   - Teks angka ukuran debugging/sementara (seperti `%.0f px`) di bawah card dilarang dimunculkan kembali setelah kebutuhan inspeksi selesai.
+
+---
+
+## 🧪 13. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
