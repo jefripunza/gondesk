@@ -155,7 +155,17 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧪 10. Prosedur Verifikasi Sebelum Commit
+## 🚫 10. Larangan Auto-Seeder Dummy / Demo Peers
+
+1. **Daftar Buku Alamat Murni Milik Pengguna**:
+   - Sistem **DILARANG KERAS** melakukan auto-seeding data dummy / demo peer ke dalam database SQLite (`peer_records`).
+   - Jika belum ada data atau pengguna telah menghapus semua desk, biarkan daftar buku alamat kosong (*empty state*: *"No matching desks found in SQLite Address Book"*).
+2. **Pengecualian Desk Lokal Sendiri ("This Desk")**:
+   - Desk lokal milik perangkat sendiri (`a.DeskID`) dilarang dimasukkan atau dimunculkan pada daftar `Remote Desks` / buku alamat.
+
+---
+
+## 🧪 11. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash

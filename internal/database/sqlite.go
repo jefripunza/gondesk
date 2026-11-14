@@ -140,52 +140,6 @@ func (s *Store) ensureDefaults(defaultPort int, defaultBridgeURL string) error {
 		_ = s.DB.Create(&cred).Error
 	}
 
-	var peerCount int64
-	if err := s.DB.Model(&PeerRecord{}).Count(&peerCount).Error; err != nil {
-		return err
-	}
-	if peerCount == 0 {
-		now := time.Now()
-		demos := []PeerRecord{
-			{
-				DeskID:          "482 910 374",
-				Alias:           "Workstation-MacPro",
-				Hostname:        "macpro-studio.local",
-				OS:              "darwin/arm64",
-				EndpointURL:     defaultBridgeURL,
-				Online:          true,
-				IsFavorite:      true,
-				LastSeenAt:      now.Add(-2 * time.Minute),
-				ConnectionCount: 5,
-			},
-			{
-				DeskID:          "719 305 628",
-				Alias:           "Office-Windows-PC",
-				Hostname:        "win11-dev-rig",
-				OS:              "windows/amd64",
-				EndpointURL:     defaultBridgeURL,
-				Online:          true,
-				IsFavorite:      true,
-				LastSeenAt:      now.Add(-5 * time.Minute),
-				ConnectionCount: 3,
-			},
-			{
-				DeskID:          "904 118 256",
-				Alias:           "Ubuntu-Build-Node",
-				Hostname:        "ubuntu-runner-01",
-				OS:              "linux/amd64",
-				EndpointURL:     defaultBridgeURL,
-				Online:          false,
-				IsFavorite:      false,
-				LastSeenAt:      now.Add(-2 * time.Hour),
-				ConnectionCount: 1,
-			},
-		}
-		for _, p := range demos {
-			_ = s.DB.Create(&p).Error
-		}
-	}
-
 	return nil
 }
 
@@ -370,4 +324,3 @@ func NormalizeDeskID(input string) string {
 	}
 	return trimmed
 }
-

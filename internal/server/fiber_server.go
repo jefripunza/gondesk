@@ -199,9 +199,15 @@ func (n *UnifiedNode) registerRoutes() {
 		if req.OS == "" {
 			req.OS = runtime.GOOS + "/" + runtime.GOARCH
 		}
-		peer, err := n.Store.UpsertPeer(req.DeskID, req.Alias, req.Hostname, req.OS, req.EndpointURL, true)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		st, _ := n.Store.GetSettings()
+		isLocalSelf := database.NormalizeDeskID(req.DeskID) == database.NormalizeDeskID(st.DeskID)
+		var peer *database.PeerRecord
+		if !isLocalSelf || n.Cfg.IsServerMode() {
+			var err error
+			peer, err = n.Store.UpsertPeer(req.DeskID, req.Alias, req.Hostname, req.OS, req.EndpointURL, true)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
 		}
 		return c.JSON(fiber.Map{
 			"status":   "ok",
@@ -262,7 +268,11 @@ func (n *UnifiedNode) registerRoutes() {
 		n.clients[deskID] = peerConn
 		n.clientsMu.Unlock()
 
-		_, _ = n.Store.UpsertPeer(deskID, alias, "", runtime.GOOS+"/"+runtime.GOARCH, n.Cfg.LocalHTTPSURL(), true)
+		st, _ := n.Store.GetSettings()
+		isLocalSelf := database.NormalizeDeskID(deskID) == database.NormalizeDeskID(st.DeskID)
+		if !isLocalSelf || n.Cfg.IsServerMode() {
+			_, _ = n.Store.UpsertPeer(deskID, alias, "", runtime.GOOS+"/"+runtime.GOARCH, n.Cfg.LocalHTTPSURL(), true)
+		}
 
 		defer func() {
 			n.clientsMu.Lock()
@@ -270,7 +280,9 @@ func (n *UnifiedNode) registerRoutes() {
 				delete(n.clients, deskID)
 			}
 			n.clientsMu.Unlock()
-			_, _ = n.Store.UpsertPeer(deskID, alias, "", "", "", false)
+			if !isLocalSelf || n.Cfg.IsServerMode() {
+				_, _ = n.Store.UpsertPeer(deskID, alias, "", "", "", false)
+			}
 			_ = c.Close()
 		}()
 

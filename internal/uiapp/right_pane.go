@@ -108,6 +108,10 @@ func (a *AppUI) filteredPeers() []database.PeerRecord {
 	q := strings.ToLower(strings.TrimSpace(a.SearchQuery))
 	out := make([]database.PeerRecord, 0, len(a.Peers))
 	for _, p := range a.Peers {
+		// Dilarang menampilkan desk lokal ("This Desk") di daftar Remote Desks
+		if database.NormalizeDeskID(p.DeskID) == database.NormalizeDeskID(a.DeskID) {
+			continue
+		}
 		if a.FilterTab == 1 && !p.IsFavorite {
 			continue
 		}
