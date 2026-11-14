@@ -18,10 +18,6 @@ func (a *AppUI) renderIncomingBanner(c *ui.Context, t *ui.Theme, inc *remote.Inc
 			})
 			if ui.PrimaryButton(c, "Accept & Share Screen").Clicked() {
 				a.Manager.AcceptIncoming()
-				_, _, _, _, sessions := a.Manager.Snapshot()
-				if len(sessions) > 0 {
-					a.ActiveTab = len(sessions) + 1
-				}
 				c.Toast("Incoming remote session accepted")
 			}
 			if ui.Button(c, "Reject").Clicked() {

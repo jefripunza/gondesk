@@ -1,0 +1,96 @@
+version: "2"
+
+linters:
+  enable:
+    # Security
+    - gosec
+
+    # Complexity
+    - gocyclo
+
+    # Performance
+    - prealloc
+    - perfsprint
+    - makezero
+    - unconvert
+    - copyloopvar
+    - intrange
+
+    # Lint & Reliability
+    - gocritic
+    - fatcontext
+    - bodyclose
+    - sqlclosecheck
+    - nilerr
+    - wastedassign
+    - usestdlibvars
+
+    # Formatter & Style
+    - whitespace
+    - tagalign
+    - dupword
+    - misspell
+
+  settings:
+    gocyclo:
+      min-complexity: 80
+    copyloopvar:
+      check-alias: true
+    gocritic:
+      enabled-checks:
+        # Bug Prevention & Concurrency Safety (additional to default)
+        - badLock
+        - badRegexp
+        - badSorting
+        - badSyncOnceFunc
+        - deferInLoop
+        - evalOrder
+        - externalErrorReassign
+        - filepathJoin
+        - nilValReturn
+        - regexpPattern
+        - returnAfterHttpError
+        - sloppyReassign
+        - sqlQuery
+        - truncateCmp
+        - uncheckedInlineErr
+        # Performance & Memory Optimization (additional to default)
+        - appendCombine
+        - boolExprSimplify
+        - deferUnlambda
+        - emptyStringTest
+        - equalFold
+        - indexAlloc
+        - preferDecodeRune
+        - preferFilepathJoin
+        - preferFprint
+        - preferStringWriter
+        - preferWriteByte
+        - rangeAppendAll
+        - rangeExprCopy
+        - redundantSprint
+        - regexpSimplify
+        - sliceClear
+        - stringConcatSimplify
+        - stringXbytes
+        - stringsCompare
+        - syncMapLoadAndDelete
+        - timeExprSimplify
+        - zeroByteRepeat
+        # Clean & Idiomatic Go Code (additional to default)
+        - dupImport
+        - emptyDecl
+        - emptyFallthrough
+        - hexLiteral
+        - httpNoBody
+        - initClause
+        - methodExprCall
+        - nestingReduce
+        - typeAssertChain
+        - typeDefFirst
+        - typeUnparen
+        - unlabelStmt
+        - yodaStyleExpr
+  exclusions:
+    paths:
+      - frontend/

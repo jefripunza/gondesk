@@ -89,10 +89,16 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 								a.DeleteConfirmModalOpen = true
 							}
 
-							ui.PrimaryButton(c, "Connect").OnClick(func() {
-								a.RemoteTargetInput = p.DeskID
-								a.startOutgoingConnection(c, p.DeskID, a.RemotePasswordInput)
-							})
+							if a.IsDeskConnected(p.DeskID) {
+								ui.PrimaryButton(c, "Disconnect").OnClick(func() {
+									a.DisconnectDesk(c, p.DeskID)
+								})
+							} else {
+								ui.PrimaryButton(c, "Connect").OnClick(func() {
+									a.RemoteTargetInput = p.DeskID
+									a.startOutgoingConnection(c, p.DeskID, a.RemotePasswordInput)
+								})
+							}
 						})
 				}
 			})
@@ -114,20 +120,40 @@ func (a *AppUI) openEditPeerModal(p database.PeerRecord) {
 }
 
 func (a *AppUI) startOutgoingConnection(c *ui.Context, target, password string) {
-	sess, err := a.Manager.ConnectToPeer(target, password)
-	if err != nil {
-		c.Toast("Connect error: " + err.Error())
-		return
-	}
-	a.ReloadFromDB()
-	_, _, _, _, sessions := a.Manager.Snapshot()
-	for i, s := range sessions {
-		if s.SessionUUID == sess.SessionUUID {
-			a.ActiveTab = i + 2
+	norm := database.NormalizeDeskID(target)
+	alias := target
+	for _, p := range a.Peers {
+		if database.NormalizeDeskID(p.DeskID) == norm {
+			if p.Alias != "" {
+				alias = p.Alias
+			}
 			break
 		}
 	}
-	c.Toast("Connected to " + sess.PeerDeskID + " via Single-Port HTTPS/TURN")
+
+	win := a.OpenRemoteWindow(target, alias)
+	sess, err := a.Manager.ConnectToPeer(target, password)
+	if err != nil {
+		if c != nil {
+			c.Toast("Connect error: " + err.Error())
+		}
+		if win != nil {
+			win.Close()
+		}
+		if a.ActiveWindows != nil {
+			delete(a.ActiveWindows, norm)
+		}
+		return
+	}
+
+	if sw, ok := a.ActiveWindows[norm]; ok {
+		sw.SessionUUID = sess.SessionUUID
+	}
+
+	a.ReloadFromDB()
+	if c != nil {
+		c.Toast("Connecting to " + sess.PeerDeskID + " in new window")
+	}
 }
 
 func (a *AppUI) filteredPeers() []database.PeerRecord {

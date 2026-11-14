@@ -193,6 +193,39 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected alias 'Linux-Workstation-Renamed', got %q", updatedPeer.Alias)
 	}
 
+	// Verify remote window pure black screen with "Connecting ..."
+	ttRemote := ui.NewTester(uiapp.RenderConnectingView, 1024, 640)
+	if !ttRemote.HasText("Connecting ...") {
+		t.Fatalf("expected remote window to show 'Connecting ...'; got texts: %v", ttRemote.Texts())
+	}
+
+	// Verify Connect button on peer card
+	if !ttDesks.HasText("Connect") {
+		t.Fatalf("expected peer card to have 'Connect' button; got texts: %v", ttDesks.Texts())
+	}
+	// Simulate opening remote window for peer
+	appUI.OpenRemoteWindow("612 840 193", "Linux-Workstation-Renamed")
+	ttDesks.Frame()
+	if !appUI.IsDeskConnected("612 840 193") {
+		t.Fatalf("expected desk '612 840 193' to be marked as connected")
+	}
+	// Verify button changes to "Disconnect" and old in-window active session screen is NOT rendered
+	if !ttDesks.HasText("Disconnect") {
+		t.Fatalf("expected peer card button to become 'Disconnect'; got texts: %v", ttDesks.Texts())
+	}
+	if ttDesks.HasText("REMOTE DESKTOP STREAM") || ttDesks.HasText("Session Chat & Telemetry") || ttDesks.HasText("Send Ctrl+Alt+Del") {
+		t.Fatalf("old in-window session view must NOT be rendered; got texts: %v", ttDesks.Texts())
+	}
+	// Click "Disconnect"
+	ttDesks.Click("Disconnect")
+	ttDesks.Frame()
+	if appUI.IsDeskConnected("612 840 193") {
+		t.Fatalf("expected desk '612 840 193' to be disconnected")
+	}
+	if !ttDesks.HasText("Connect") {
+		t.Fatalf("expected button to revert to 'Connect'; got texts: %v", ttDesks.Texts())
+	}
+
 	// Reopen modal to verify Cancel and backdrop behavior
 	appUI.AddPeerModalOpen = true
 	appUI.NewPeerID = "123123193"

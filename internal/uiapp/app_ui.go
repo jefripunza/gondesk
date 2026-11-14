@@ -25,9 +25,12 @@ type AppUI struct {
 	Win     *mygo.Window
 
 	// Navigation & Tab state
-	ActiveTab       int    // 0 = Home / Desks View, 1 = Settings, >=2 = Active Session index (idx - 2)
+	ActiveTab       int    // 0 = Home / Desks View, 1 = Settings
 	SettingsSection string // "general", "network", "about"
 	FilterTab       int    // 0 = All Desks, 1 = Favorites, 2 = Online Only
+
+	// Active session windows tracked by normalized DeskID
+	ActiveWindows map[string]*ActiveSessionWindow
 
 	// Local Desk ("This Desk" - Di-remote) state bound to controls
 	DeskID            string
@@ -70,9 +73,6 @@ type AppUI struct {
 	quickConnectURLFocused bool
 	modalPeerURLFocused    bool
 
-	// Active session chat draft
-	ChatDraft string
-
 	// Cached SQLite records refreshed on state changes
 	Peers       []database.PeerRecord
 	SessionLogs []database.SessionLog
@@ -87,6 +87,7 @@ func NewAppUI(cfg *config.Config, store *database.Store, node *server.UnifiedNod
 		Node:            node,
 		Manager:         mgr,
 		SettingsSection: "general",
+		ActiveWindows:   make(map[string]*ActiveSessionWindow),
 	}
 	a.ReloadFromDB()
 	return a
@@ -140,23 +141,15 @@ func (a *AppUI) View(c *ui.Context) {
 		ui.Divider(c)
 
 		// Desktop Mode (can Remote and Be Remoted)
-		_, _, _, incoming, sessions := a.Manager.Snapshot()
+		_, _, _, incoming, _ := a.Manager.Snapshot()
 		if incoming != nil {
 			a.renderIncomingBanner(c, t, incoming)
 		}
 
-		if a.ActiveTab == 0 {
-			a.renderDesksView(c, t)
-		} else if a.ActiveTab == 1 {
+		if a.ActiveTab == 1 {
 			a.renderDesktopSettings(c, t)
 		} else {
-			sessIdx := a.ActiveTab - 2
-			if sessIdx >= 0 && sessIdx < len(sessions) {
-				a.renderActiveSessionView(c, t, sessions[sessIdx])
-			} else {
-				a.ActiveTab = 0
-				a.renderDesksView(c, t)
-			}
+			a.renderDesksView(c, t)
 		}
 	})
 

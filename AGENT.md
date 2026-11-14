@@ -184,7 +184,7 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
      - `banner.go`: Banner notifikasi persetujuan sesi remote masuk (*incoming prompt*).
      - `desks_view.go`: Tampilan utama daftar desk, filter tabs (All Desks, Favorites, Online), pencarian, dan kartu peer remote.
      - `modals.go`: Dialog modal popup (dialog tambah desk dan dialog konfirmasi hapus).
-     - `active_session.go`: Viewport remote desktop canvas GPU dan sidebar chat/telemetri.
+     - `remote_window.go`: Jendela baru (new window) sesi remote desktop dengan layar hitam dan tulisan "Connecting ...", manajemen status aktif window, dan fungsi disconnect.
      - `settings.go`: Pengaturan desktop dengan navigasi sidebar menu (`General`, `Network`, `About`).
 2. **Kaidah Penambahan Fitur UI Baru**:
    - Setiap kali membuat komponen antarmuka baru dengan konteks berbeda, **wajib dibuatkan file `.go` baru** di package `internal/uiapp/` dengan nama yang deskriptif.
@@ -208,11 +208,17 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
    - Halaman utama remote desks kini menggunakan tampilan penuh melalui [desks_view.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/desks_view.go) tanpa `ui.Split`.
 2. **Larangan Menampilkan Nilai Ukuran Sementara**:
    - Teks angka ukuran debugging/sementara (seperti `%.0f px`) dilarang dimunculkan kembali setelah kebutuhan inspeksi selesai.
-3. **Urutan Tombol Aksi pada Kartu Remote Desk**:
+3. **Urutan & Perubahan Dinamis Tombol Aksi pada Kartu Remote Desk**:
    - Kartu remote desk di [desks_view.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/desks_view.go) memiliki susunan tombol aksi:
-     `[ ☆ / ★ Favorite ] [ ✏️ Edit ] [ 🗑 Delete ] [ Connect ]`
+     `[ ☆ / ★ Favorite ] [ ✏️ Edit ] [ 🗑 Delete ] [ Connect / Disconnect ]`
    - **Tombol Edit (`✏️`)** wajib diletakkan tepat di antara tombol favorit (`☆` / `★`) dan tombol hapus (`🗑`).
    - Mengklik tombol Edit akan membuka modal dialog dalam mode pengeditan (`Edit Desk` dengan tombol aksi `Save Changes`), mengisi seluruh data desk yang ada (URL, 9-digit ID terbagi dalam 3 segmen, dan Alias), serta menyimpan pembaruan ke SQLite database (`Store.UpsertPeer`), termasuk menghapus ID lama jika pengguna mengubah nomor ID desk.
+   - **Tombol Connect / Disconnect Dinamis**:
+     - Saat tombol **"Connect"** diklik, aplikasi membuka **jendela baru (new window)** melalui [remote_window.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/remote_window.go) dengan layar hitam pekat (`#000000`) dan tulisan terpusat `"Connecting ..."`.
+     - Tampilan sesi di dalam jendela utama (canvas GPU, chat sidebar, dan toolbar Ctrl+Alt+Del) **TELAH DIHAPUS PERMANEN** dari jendela utama.
+     - Selama window remote aktif untuk desk tersebut, tombol **"Connect"** berubah dinamis menjadi **"Disconnect"**.
+     - Mengklik tombol **"Disconnect"** akan menutup window remote (`win.Close()`), memutus sesi remote di background, dan mengubah tombol kembali menjadi **"Connect"**.
+     - Jika pengguna menutup window remote secara manual via tombol close OS ('X'), event `win.OnClosed` otomatis memutus sesi dan mengembalikan tombol pada jendela utama menjadi **"Connect"**.
 
 ---
 
