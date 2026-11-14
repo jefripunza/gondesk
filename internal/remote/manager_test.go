@@ -2,7 +2,9 @@ package remote
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"gondesk/internal/config"
 	"gondesk/internal/database"
@@ -263,6 +265,66 @@ func TestManagerSessionErrorOffline(t *testing.T) {
 	}
 	if s.ErrorMessage != "Desk tujuan (123 321 123) tidak aktif atau belum membuka aplikasi GonDesk" {
 		t.Fatalf("unexpected error message: %q", s.ErrorMessage)
+	}
+}
+
+func TestIsSelfEndpoint(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+	mgr.Cfg.ListenPort = 8443
+
+	tests := []struct {
+		url      string
+		expected bool
+	}{
+		{"https://127.0.0.1:8443", true},
+		{"http://127.0.0.1:8443", true},
+		{"https://localhost:8443", true},
+		{"https://0.0.0.0:8443", true},
+		{"https://127.0.0.1:8444", false},
+		{"https://192.168.1.50:8443", false},
+		{"https://remote.desk.local:8443", false},
+		{"invalid-url", false},
+	}
+
+	for _, tc := range tests {
+		got := mgr.isSelfEndpoint(tc.url)
+		if got != tc.expected {
+			t.Errorf("isSelfEndpoint(%q) = %v; expected %v", tc.url, got, tc.expected)
+		}
+	}
+}
+
+func TestConnectToDirectEndpointUnreachable(t *testing.T) {
+	mgr, store := setupTestManager(t)
+
+	// Save peer with a remote non-existent endpoint
+	targetDesk := "555 444 333"
+	_, err := store.UpsertPeer(targetDesk, "Target-PC", "", "linux/amd64", "https://127.0.0.1:59999", true)
+	if err != nil {
+		t.Fatalf("UpsertPeer failed: %v", err)
+	}
+
+	sess, err := mgr.ConnectToPeer(targetDesk, "")
+	if err != nil {
+		t.Fatalf("ConnectToPeer returned error: %v", err)
+	}
+	if sess == nil {
+		t.Fatalf("expected non-nil session")
+	}
+
+	// Wait briefly for dial goroutine to report unreachable error
+	time.Sleep(300 * time.Millisecond)
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session")
+	}
+	s := sessions[0]
+	if s.Status != "error" {
+		t.Fatalf("expected session status 'error', got %q", s.Status)
+	}
+	if !strings.Contains(s.ErrorMessage, "Gagal terhubung ke") {
+		t.Fatalf("expected error message to explain connection failure, got: %q", s.ErrorMessage)
 	}
 }
 

@@ -342,7 +342,7 @@ func (n *UnifiedNode) registerRoutes() {
 			// Check if target is this local Desktop instance itself (Direct connection or loopback)
 			if !handled {
 				localSettings, err := n.Store.GetSettings()
-				if err == nil && (msg.ToDeskID == localSettings.DeskID || msg.ToDeskID == "local") {
+				if err == nil && (database.NormalizeDeskID(msg.ToDeskID) == database.NormalizeDeskID(localSettings.DeskID) || msg.ToDeskID == "local") {
 					if n.Cfg.ShowDesktopFeatures() && n.localHandler != nil {
 						n.localHandler(msg)
 						handled = true

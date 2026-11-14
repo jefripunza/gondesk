@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ type ActiveSession struct {
 	Participants    map[string]*RemoteCursor
 	LastInput       string
 	FrameTick       int
+	directWS        *websocket.Conn
 }
 
 // IncomingPrompt represents a pending incoming remote control request waiting for user approval.
@@ -408,6 +410,68 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	}
 }
 
+func (m *Manager) isSelfEndpoint(endpointURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpointURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	if port == "" {
+		if u.Scheme == "https" {
+			port = "443"
+		} else {
+			port = "80"
+		}
+	}
+	listenPortStr := strconv.Itoa(m.Cfg.ListenPort)
+	if port != listenPortStr {
+		return false
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0"
+}
+
+func (m *Manager) sendSessionSignal(sessionUUID string, msg server.SignalMessage) {
+	m.mu.Lock()
+	var directWS *websocket.Conn
+	for _, s := range m.sessions {
+		if s.SessionUUID == sessionUUID {
+			directWS = s.directWS
+			break
+		}
+	}
+	bridgeWS := m.bridgeWS
+	m.mu.Unlock()
+
+	// 1. Send via direct session WebSocket if active (Outgoing P2P client to host)
+	if directWS != nil {
+		_ = directWS.WriteJSON(msg)
+		return
+	}
+
+	// 2. Deliver directly to peer connected to our node (Incoming host to client)
+	if m.Node != nil && m.Node.SendSignalToPeer(msg) {
+		return
+	}
+
+	// 3. Fallback to Global Bridge WebSocket
+	if bridgeWS != nil {
+		_ = bridgeWS.WriteJSON(msg)
+	}
+}
+
+func (m *Manager) sendReplySignal(msg server.SignalMessage) {
+	if m.Node != nil && m.Node.SendSignalToPeer(msg) {
+		return
+	}
+	m.mu.Lock()
+	ws := m.bridgeWS
+	m.mu.Unlock()
+	if ws != nil {
+		_ = ws.WriteJSON(msg)
+	}
+}
+
 // ConnectToPeer initiates a remote desktop connection to targetDeskOrURL over the single port.
 func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSession, error) {
 	if !m.Cfg.ShowDesktopFeatures() {
@@ -484,55 +548,90 @@ func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSessio
 	}
 
 	switch {
-	case ws != nil:
-		_ = ws.WriteJSON(reqMsg)
-	case m.Node != nil && m.Node.SendSignalToPeer(reqMsg):
-		// Delivered directly to locally connected peer
-	case endpointURL != "":
-		// Direct dial probe over Single-Port
+	case endpointURL != "" && !m.isSelfEndpoint(endpointURL):
+		// 1. Direct Single-Port Remote Connection (Dial target host over WSS)
 		go func() {
-			time.Sleep(100 * time.Millisecond)
-			client := &http.Client{
-				Timeout: 2 * time.Second,
-				Transport: &http.Transport{
-					// #nosec G402
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			}
-			infoURL := strings.TrimRight(endpointURL, "/") + "/api/v1/info"
-			resp, err := client.Get(infoURL)
+			wsURL, err := toWebSocketSignalURL(endpointURL, st.DeskID, st.Alias)
 			if err != nil {
 				m.mu.Lock()
 				sess.Status = "error"
-				sess.ErrorMessage = fmt.Sprintf("Gagal terhubung ke %s: Aplikasi tujuan tidak aktif atau tidak terjangkau", target)
+				sess.ErrorMessage = "Format URL desk tidak valid: " + endpointURL
+				m.mu.Unlock()
+				m.notify()
+				return
+			}
+			dialer := websocket.Dialer{
+				// #nosec G402 -- self-signed certificate on local/peer mesh single port
+				TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
+				HandshakeTimeout: 4 * time.Second,
+			}
+			conn, wsResp, err := dialer.Dial(wsURL, nil)
+			if wsResp != nil && wsResp.Body != nil {
+				_ = wsResp.Body.Close()
+			}
+			if err != nil {
+				m.mu.Lock()
+				sess.Status = "error"
+				sess.ErrorMessage = fmt.Sprintf("Gagal terhubung ke %s (%s): Aplikasi tujuan tidak aktif atau port tidak dapat diakses", target, endpointURL)
 				sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), sess.ErrorMessage))
 				m.mu.Unlock()
 				m.notify()
 				return
 			}
-			_ = resp.Body.Close()
 
 			m.mu.Lock()
-			sess.Status = "connected"
-			sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] TLS 1.3 + Pion TURN Relay & Direct Channel Ready", time.Now().Format("15:04:05")))
-			if _, ok := sess.Participants[target]; !ok {
-				sess.Participants[target] = &RemoteCursor{
-					DeskID:     target,
-					Alias:      alias,
-					Color:      GetCursorColor(len(sess.Participants)),
-					NormX:      0.5,
-					NormY:      0.5,
-					LastAction: "connected",
-					UpdatedAt:  time.Now(),
-				}
-			}
+			sess.directWS = conn
 			m.mu.Unlock()
-			m.notify()
+
+			// Send session_request directly to the host
+			if err := conn.WriteJSON(reqMsg); err != nil {
+				m.mu.Lock()
+				sess.Status = "error"
+				sess.ErrorMessage = "Gagal mengirim permintaan remote ke " + target
+				m.mu.Unlock()
+				_ = conn.Close()
+				m.notify()
+				return
+			}
+
+			// Dedicated read loop for this direct session
+			go func() {
+				defer func() {
+					_ = conn.Close()
+					m.mu.Lock()
+					if sess.directWS == conn {
+						sess.directWS = nil
+					}
+					if sess.Status == "connecting" {
+						sess.Status = "error"
+						sess.ErrorMessage = fmt.Sprintf("Koneksi ke %s terputus sebelum sesi diterima", target)
+					}
+					m.mu.Unlock()
+					m.notify()
+				}()
+
+				for {
+					_, data, err := conn.ReadMessage()
+					if err != nil {
+						return
+					}
+					var msg server.SignalMessage
+					if err := json.Unmarshal(data, &msg); err != nil {
+						continue
+					}
+					m.HandleSignal(msg)
+				}
+			}()
 		}()
+	case m.Node != nil && m.Node.SendSignalToPeer(reqMsg):
+		// 2. Direct client already connected to this node
+	case ws != nil:
+		// 3. Forward via Global Bridge Server
+		_ = ws.WriteJSON(reqMsg)
 	default:
-		// Peer not on bridge and no endpoint URL
+		// 4. Offline and no endpoint URL
 		sess.Status = "error"
-		sess.ErrorMessage = fmt.Sprintf("Desk tujuan (%s) tidak aktif atau belum terhubung ke bridge", target)
+		sess.ErrorMessage = fmt.Sprintf("Desk tujuan (%s) tidak memiliki URL dan belum terhubung ke bridge", target)
 		sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), sess.ErrorMessage))
 	}
 
@@ -601,7 +700,6 @@ func (m *Manager) acceptIncomingSession(sessionUUID, fromDeskID, fromAlias strin
 
 	m.mu.Lock()
 	m.sessions = append(m.sessions, sess)
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
 	_ = m.Store.RecordSession(sessionUUID, fromDeskID, st.DeskID, transportDesc, "active", "Incoming host session accepted")
@@ -614,11 +712,7 @@ func (m *Manager) acceptIncomingSession(sessionUUID, fromDeskID, fromAlias strin
 		ToDeskID:    fromDeskID,
 		Transport:   transportDesc,
 	}
-	if ws != nil {
-		_ = ws.WriteJSON(reply)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(reply)
-	}
+	m.sendReplySignal(reply)
 	m.notify()
 }
 
@@ -627,7 +721,6 @@ func (m *Manager) RejectIncoming() {
 	m.mu.Lock()
 	inc := m.incoming
 	m.incoming = nil
-	ws := m.bridgeWS
 	m.mu.Unlock()
 	if inc == nil {
 		return
@@ -641,11 +734,7 @@ func (m *Manager) RejectIncoming() {
 		FromDeskID:  st.DeskID,
 		ToDeskID:    inc.FromDeskID,
 	}
-	if ws != nil {
-		_ = ws.WriteJSON(reply)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(reply)
-	}
+	m.sendReplySignal(reply)
 	m.notify()
 }
 
@@ -654,26 +743,30 @@ func (m *Manager) DisconnectSession(sessionUUID string) {
 	st, _ := m.Store.GetSettings()
 	m.mu.Lock()
 	var targetPeer string
+	var targetWS *websocket.Conn
 	filtered := make([]*ActiveSession, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		if s.SessionUUID == sessionUUID {
 			targetPeer = s.PeerDeskID
+			targetWS = s.directWS
 			continue
 		}
 		filtered = append(filtered, s)
 	}
 	m.sessions = filtered
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
 	_ = m.Store.RecordSession(sessionUUID, st.DeskID, targetPeer, "Single-Port HTTPS/WSS + TURNS", "completed", "Closed by user")
-	if targetPeer != "" && ws != nil {
-		_ = ws.WriteJSON(server.SignalMessage{
+	if targetPeer != "" {
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "disconnect",
 			SessionUUID: sessionUUID,
 			FromDeskID:  st.DeskID,
 			ToDeskID:    targetPeer,
 		})
+	}
+	if targetWS != nil {
+		_ = targetWS.Close()
 	}
 	m.notify()
 }
@@ -695,11 +788,10 @@ func (m *Manager) SendChat(sessionUUID, text string) {
 			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] You: %s", nowStr, text))
 		}
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	if peerID != "" && ws != nil {
-		_ = ws.WriteJSON(server.SignalMessage{
+	if peerID != "" {
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "chat",
 			SessionUUID: sessionUUID,
 			FromDeskID:  st.DeskID,
@@ -726,11 +818,10 @@ func (m *Manager) SendRemoteAction(sessionUUID, action string) {
 			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Action -> %s", nowStr, action))
 		}
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	if peerID != "" && ws != nil {
-		_ = ws.WriteJSON(server.SignalMessage{
+	if peerID != "" {
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "input",
 			SessionUUID: sessionUUID,
 			FromDeskID:  st.DeskID,
@@ -755,21 +846,17 @@ func (m *Manager) SendClipboard(sessionUUID, text string) {
 			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Clipboard sent (%d chars)", nowStr, len(text)))
 		}
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	msg := server.SignalMessage{
-		Type:        "clipboard",
-		SessionUUID: sessionUUID,
-		FromDeskID:  st.DeskID,
-		ToDeskID:    peerID,
-		Payload:     text,
-		Timestamp:   nowStr,
-	}
-	if ws != nil {
-		_ = ws.WriteJSON(msg)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(msg)
+	if peerID != "" {
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
+			Type:        "clipboard",
+			SessionUUID: sessionUUID,
+			FromDeskID:  st.DeskID,
+			ToDeskID:    peerID,
+			Payload:     text,
+			Timestamp:   nowStr,
+		})
 	}
 	m.notify()
 }
@@ -789,22 +876,18 @@ func (m *Manager) SendFile(sessionUUID, filename string, data []byte) {
 			s.FileTransferLog = append(s.FileTransferLog, desc)
 		}
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	payload := fmt.Sprintf("%s|%d", filename, len(data))
-	msg := server.SignalMessage{
-		Type:        "file_offer",
-		SessionUUID: sessionUUID,
-		FromDeskID:  st.DeskID,
-		ToDeskID:    peerID,
-		Payload:     payload,
-		Timestamp:   nowStr,
-	}
-	if ws != nil {
-		_ = ws.WriteJSON(msg)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(msg)
+	if peerID != "" {
+		payload := fmt.Sprintf("%s|%d", filename, len(data))
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
+			Type:        "file_offer",
+			SessionUUID: sessionUUID,
+			FromDeskID:  st.DeskID,
+			ToDeskID:    peerID,
+			Payload:     payload,
+			Timestamp:   nowStr,
+		})
 	}
 	m.notify()
 }
@@ -836,27 +919,23 @@ func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
 		cur.LastAction = "move"
 		cur.UpdatedAt = time.Now()
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	payload, _ := json.Marshal(map[string]any{
-		"norm_x": normX,
-		"norm_y": normY,
-		"alias":  st.Alias,
-	})
-	msg := server.SignalMessage{
-		Type:        "mouse_move",
-		SessionUUID: sessionUUID,
-		FromDeskID:  st.DeskID,
-		FromAlias:   st.Alias,
-		ToDeskID:    peerID,
-		Payload:     string(payload),
-		Timestamp:   time.Now().Format("15:04:05"),
-	}
-	if ws != nil {
-		_ = ws.WriteJSON(msg)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(msg)
+	if peerID != "" {
+		payload, _ := json.Marshal(map[string]any{
+			"norm_x": normX,
+			"norm_y": normY,
+			"alias":  st.Alias,
+		})
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
+			Type:        "mouse_move",
+			SessionUUID: sessionUUID,
+			FromDeskID:  st.DeskID,
+			FromAlias:   st.Alias,
+			ToDeskID:    peerID,
+			Payload:     string(payload),
+			Timestamp:   time.Now().Format("15:04:05"),
+		})
 	}
 }
 
@@ -889,28 +968,24 @@ func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, butto
 		s.LastInput = fmt.Sprintf("Click (%s at %.2f, %.2f)", st.Alias, normX, normY)
 		s.FrameTick++
 	}
-	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	payload, _ := json.Marshal(map[string]any{
-		"norm_x": normX,
-		"norm_y": normY,
-		"button": button,
-		"alias":  st.Alias,
-	})
-	msg := server.SignalMessage{
-		Type:        "mouse_click",
-		SessionUUID: sessionUUID,
-		FromDeskID:  st.DeskID,
-		FromAlias:   st.Alias,
-		ToDeskID:    peerID,
-		Payload:     string(payload),
-		Timestamp:   time.Now().Format("15:04:05"),
-	}
-	if ws != nil {
-		_ = ws.WriteJSON(msg)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(msg)
+	if peerID != "" {
+		payload, _ := json.Marshal(map[string]any{
+			"norm_x": normX,
+			"norm_y": normY,
+			"button": button,
+			"alias":  st.Alias,
+		})
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
+			Type:        "mouse_click",
+			SessionUUID: sessionUUID,
+			FromDeskID:  st.DeskID,
+			FromAlias:   st.Alias,
+			ToDeskID:    peerID,
+			Payload:     string(payload),
+			Timestamp:   time.Now().Format("15:04:05"),
+		})
 	}
 	m.notify()
 }

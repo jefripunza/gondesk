@@ -259,7 +259,20 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
 
 ---
 
-## 🧪 15. Prosedur Verifikasi Sebelum Commit
+## 🌐 15. Aturan Routing Koneksi Remote Desktop (Direct P2P & Bridge Signaling)
+
+1. **Prioritas Koneksi Langsung (Direct Single-Port P2P)**:
+   - Apabila desk tujuan memiliki `EndpointURL` dan bukan menunjuk ke alamat server lokal milik diri sendiri (`!m.isSelfEndpoint(endpointURL)`), GonDesk **WAJIB** melakukan direct dial WebSocket TLS ke `wss://<endpointURL>/ws/signal?desk_id=...&alias=...`.
+   - Menggunakan `websocket.Dialer` dengan TLS `InsecureSkipVerify: true` agar sertifikat mandiri X.509 ECDSA dapat saling terhubung.
+   - Sinyal `session_request` dikirimkan langsung ke host tujuan melalui koneksi direct tersebut.
+   - Jika koneksi gagal (host offline / port tidak terjangkau), jendela remote langsung masuk ke status `"error"` dengan pesan yang jelas dan tombol **"Reconnect"** tanpa menutup jendela.
+2. **Penyampaian Sinyal Dua Arah Sadar Sesi (`sendSessionSignal` & `sendReplySignal`)**:
+   - Seluruh event real-time (`mouse_move`, `mouse_click`, `clipboard`, `file_offer`, `chat`, `disconnect`) wajib menggunakan `sendSessionSignal`. Jika sesi memiliki `directWS`, kirim langsung ke WebSocket sesi tersebut; jika peer terhubung ke node lokal (`m.Node`), kirim via `m.Node.SendSignalToPeer`; baru fallback ke `m.bridgeWS`.
+   - Host penerima wajib membalas `session_accept` / `session_reject` ke klien yang terhubung via `m.Node.SendSignalToPeer` sebelum fallback ke bridge.
+
+---
+
+## 🧪 16. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
