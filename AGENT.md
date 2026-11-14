@@ -119,7 +119,24 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧪 8. Prosedur Verifikasi Sebelum Commit
+## 📦 8. Aturan Penamaan & Format Asset Release GitHub
+
+1. **Dilarang Menyertakan Format `.tar.gz` dan `.zip`**:
+   - Release assets pada GitHub Release **TIDAK BOLEH** menyertakan arsip `.tar.gz` maupun `.zip`.
+2. **Format Baku Penamaan File Asset**:
+   - Semua file asset rilis **WAJIB** mengikuti format seragam:
+     ```text
+     gondesk-[version]-[os]-[arch].[ext]
+     ```
+   - Rincian penamaan baku untuk seluruh OS:
+     - **Linux DEB**: `gondesk-[version]-linux-amd64.deb`, `gondesk-[version]-linux-arm64.deb`
+     - **Linux RPM**: `gondesk-[version]-linux-amd64.rpm`, `gondesk-[version]-linux-arm64.rpm`
+     - **Windows EXE**: `gondesk-[version]-windows-amd64.exe`, `gondesk-[version]-windows-arm64.exe`
+     - **macOS DMG**: `gondesk-[version]-macos-universal.dmg`, `gondesk-[version]-macos-arm64.dmg`, `gondesk-[version]-macos-amd64.dmg`
+
+---
+
+## 🧪 9. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash

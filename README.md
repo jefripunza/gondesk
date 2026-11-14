@@ -46,7 +46,7 @@
 - **🗄️ Embedded Pure-Go SQLite with GORM**:
   - Zero external database dependencies. Uses `gorm.io/gorm` + `github.com/glebarez/sqlite` (`CGO_ENABLED=0`) to persist desk identity, address book peers, TURN credentials, and session audit logs.
 - **📦 Automated Multi-OS & Docker Releases**:
-  - GitHub Actions pipeline automatically versions (`vX.Y.Z`), builds & pushes multi-arch Docker images (`linux/amd64`, `linux/arm64`) to Docker Hub, and packages downloadable installers/binaries for **Linux** (`.deb`, `.rpm`, `.tar.gz`), **Windows** (`.exe` installer & portable `.zip`), and **macOS** (`.dmg` Universal/ARM64/Intel & `.app.zip`).
+  - GitHub Actions pipeline automatically versions (`vX.Y.Z`), builds & pushes multi-arch Docker images (`linux/amd64`, `linux/arm64`) to Docker Hub, and packages downloadable installers for **Linux** (`.deb`, `.rpm`), **Windows** (`.exe` installer), and **macOS** (`.dmg` Universal/ARM64/Intel) with standardized naming: `gondesk-[version]-[os]-[arch].[ext]`.
 
 ---
 
