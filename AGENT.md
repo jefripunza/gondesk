@@ -61,16 +61,23 @@ func (a *AppUI) renderMyModal(c *ui.Context, t *ui.Theme) {
 
 ## 🔗 2. Aturan Validasi & Normalisasi URL Input (`onblur`)
 
-Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan desk) **WAJIB** menerapkan aturan normalisasi berikut:
+Setiap kolom input URL (terutama pada modal dialog penambahan desk) **WAJIB** menerapkan aturan validasi dan normalisasi berikut:
 
-1. **Auto-Prepend `http://`**:
+1. **Penamaan Kolom**:
+   - Label atau placeholder kolom URL wajib menggunakan nama **"URL"** (misal: `"URL (e.g. https://host:8443)"`), **DILARANG** menggunakan `"Endpoint URL"`.
+2. **Auto-Prepend `http://`**:
    - Jika pengguna hanya mengisi alamat host atau IP beserta port (misalnya: `"192.168.1.1:8443"`), sistem wajib secara otomatis mengubahnya menjadi `"http://192.168.1.1:8443"`.
    - Jika pengguna sudah menuliskan skema protocol (`http://` atau `https://`), protokol tersebut tidak boleh diubah.
-2. **Pangkas Trailing Slash (`/`)**:
-   - Jika terdapat slash penutup di akhir URL (misalnya `"http://192.168.1.1:8443/"` atau `"192.168.1.1:8443/"`), karakter slash penutup wajib otomatis dihapus sehingga menjadi `"http://192.168.1.1:8443"`.
-3. **Eksekusi Normalisasi pada Event `onblur` & Submit**:
-   - Normalisasi harus terjadi saat kursor berpindah keluar dari kolom input (`FocusLeft()` / `!Focused()`), serta saat tombol aksi submit / `Connect` diklik.
-   - Gunakan fungsi utilitas baku `CleanURL(raw string) string`.
+3. **Pangkas Trailing Slash (`/`)**:
+   - Jika terdapat slash penutup di akhir URL (misalnya `"http://192.168.1.1:8443/"`), karakter slash penutup wajib otomatis dihapus sehingga menjadi `"http://192.168.1.1:8443"`.
+4. **Validasi Ketat: Hanya IP atau Domain Tanpa Endpoint / Path**:
+   - URL yang dimasukkan wajib murni alamat IP (IPv4 / IPv6) atau nama domain/hostname yang valid, dengan port opsional.
+   - **DILARANG KERAS** memuat path / endpoint (misal `/api`, `/endpoint`, `/remote`), query string (`?foo=bar`), atau fragment (`#hash`).
+   - Gunakan fungsi utilitas baku `ValidateHostURL(raw string) (cleaned string, errStr string)`.
+5. **Eksekusi Validasi pada Event `onblur` & Render Error Merah**:
+   - Validasi dijalankan saat kursor berpindah keluar dari kolom input (`FocusLeft()` / `!Focused()`), serta saat tombol aksi submit / `Save Desk` diklik.
+   - Jika terdapat error validasi, tampilkan teks pesan error berwarna merah (`#EF443B`) tepat di bawah kolom input URL.
+   - Tombol submit wajib memblokir proses simpan selama URL belum valid.
 
 ---
 

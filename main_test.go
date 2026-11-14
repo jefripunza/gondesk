@@ -79,6 +79,37 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !ttModal.HasText("Add Desk to Address Book") {
 		t.Fatalf("expected modal to be open; got texts: %v", ttModal.Texts())
 	}
+	if ttModal.HasText("Endpoint URL (e.g. https://host:8443)") {
+		t.Fatalf("expected 'Endpoint URL' to be renamed to 'URL'")
+	}
+
+	// Verify modal URL validation: path/endpoint is rejected and red error text is rendered
+	appUI.NewPeerURL = "https://10.20.30.40:8443/api/v1"
+	cleaned, errMsg := uiapp.ValidateHostURL(appUI.NewPeerURL)
+	appUI.NewPeerURL = cleaned
+	appUI.NewPeerURLError = errMsg
+	ttModalErr := ui.NewTester(appUI.View, 1120, 720)
+	expectedErrMsg := "URL tidak boleh berisi path atau endpoint (hanya IP atau domain, contoh: https://host:8443)"
+	if !ttModalErr.HasText(expectedErrMsg) {
+		t.Fatalf("expected modal to show red error text %q; got texts: %v", expectedErrMsg, ttModalErr.Texts())
+	}
+	// Attempting to Save Desk with invalid URL must be blocked
+	ttModalErr.Click("Save Desk")
+	ttModalErr.Frame()
+	if !appUI.AddPeerModalOpen {
+		t.Fatalf("expected modal to remain open when Save Desk is clicked with invalid URL")
+	}
+
+	// Correct the URL to pure IP:Port
+	appUI.NewPeerURL = "10.20.30.40:8443"
+	cleaned, errMsg = uiapp.ValidateHostURL(appUI.NewPeerURL)
+	appUI.NewPeerURL = cleaned
+	appUI.NewPeerURLError = errMsg
+	ttModalValid := ui.NewTester(appUI.View, 1120, 720)
+	if ttModalValid.HasText(expectedErrMsg) {
+		t.Fatalf("expected red error text to disappear after valid URL; got texts: %v", ttModalValid.Texts())
+	}
+
 	// Click outside the modal dialog (at top-left backdrop coordinate)
 	ttModal.ClickAt(10, 10)
 	ttModal.Frame()
@@ -288,6 +319,57 @@ func TestCleanURL(t *testing.T) {
 		got := uiapp.CleanURL(tc.input)
 		if got != tc.expected {
 			t.Errorf("CleanURL(%q) = %q; expected %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestValidateHostURL(t *testing.T) {
+	tests := []struct {
+		input       string
+		expectedURL string
+		expectErr   bool
+	}{
+		// Valid IP and domain formats without endpoint/path
+		{"192.168.1.1:8443", "http://192.168.1.1:8443", false},
+		{"https://192.168.1.1:8443", "https://192.168.1.1:8443", false},
+		{"http://192.168.1.1:8443/", "http://192.168.1.1:8443", false},
+		{"https://example.com:8443", "https://example.com:8443", false},
+		{"example.com", "http://example.com", false},
+		{"localhost:8443", "http://localhost:8443", false},
+		{"desk-node.local:8443", "http://desk-node.local:8443", false},
+		{"https://[::1]:8443", "https://[::1]:8443", false},
+		{"", "", false},
+
+		// Invalid: contains endpoint / path
+		{"https://192.168.1.1:8443/api", "https://192.168.1.1:8443/api", true},
+		{"http://example.com/remote", "http://example.com/remote", true},
+		{"10.0.0.1:8080/path/sub", "http://10.0.0.1:8080/path/sub", true},
+
+		// Invalid: query or fragment
+		{"http://192.168.1.1:8443?token=123", "http://192.168.1.1:8443?token=123", true},
+		{"http://example.com#section", "http://example.com#section", true},
+
+		// Invalid: malformed IP or domain
+		{"http://192.168.1.300:8443", "http://192.168.1.300:8443", true},
+		{"http://-bad-.com", "http://-bad-.com", true},
+		{"http://invalid..domain", "http://invalid..domain", true},
+		{"http://", "http://", true},
+
+		// Invalid: port range out of bounds
+		{"http://example.com:99999", "http://example.com:99999", true},
+		{"http://example.com:0", "http://example.com:0", true},
+	}
+
+	for _, tc := range tests {
+		gotCleaned, gotErr := uiapp.ValidateHostURL(tc.input)
+		if tc.expectErr && gotErr == "" {
+			t.Errorf("ValidateHostURL(%q) expected error, but got none (cleaned=%q)", tc.input, gotCleaned)
+		}
+		if !tc.expectErr && gotErr != "" {
+			t.Errorf("ValidateHostURL(%q) unexpected error: %s (cleaned=%q)", tc.input, gotErr, gotCleaned)
+		}
+		if gotCleaned != tc.expectedURL {
+			t.Errorf("ValidateHostURL(%q) cleaned = %q; expected %q", tc.input, gotCleaned, tc.expectedURL)
 		}
 	}
 }

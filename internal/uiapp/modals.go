@@ -18,12 +18,20 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 
 		ui.Text(c, "Add Desk to Address Book").FontSize(16).Bold()
 
-		urlIn := ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).
-			Placeholder("Endpoint URL (e.g. https://host:8443)").AutoFocus()
-		if urlIn.FocusLeft() || (a.modalPeerURLFocused && !urlIn.Focused()) {
-			a.NewPeerURL = CleanURL(a.NewPeerURL)
-		}
-		a.modalPeerURLFocused = urlIn.Focused()
+		ui.Column(c).Gap(4).Children(func() {
+			urlIn := ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).
+				Placeholder("URL (e.g. https://host:8443)").AutoFocus()
+			if urlIn.FocusLeft() || (a.modalPeerURLFocused && !urlIn.Focused()) {
+				cleaned, errMsg := ValidateHostURL(a.NewPeerURL)
+				a.NewPeerURL = cleaned
+				a.NewPeerURLError = errMsg
+			}
+			a.modalPeerURLFocused = urlIn.Focused()
+
+			if a.NewPeerURLError != "" {
+				ui.Text(c, a.NewPeerURLError).FontSize(12).TextColor(ui.Hex("#EF443B"))
+			}
+		})
 
 		ui.TextInput(c.Key("modal-peer-id"), &a.NewPeerID).Placeholder("GonDesk ID (e.g. 612 840 193)")
 		ui.TextInput(c.Key("modal-peer-alias"), &a.NewPeerAlias).Placeholder("Alias (e.g. Home-Desktop)")
@@ -31,9 +39,18 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.AddPeerModalOpen = false
+				a.NewPeerURLError = ""
 			}
 			if ui.PrimaryButton(c, "Save Desk").Clicked() {
-				rawURL := CleanURL(a.NewPeerURL)
+				cleaned, errMsg := ValidateHostURL(a.NewPeerURL)
+				a.NewPeerURL = cleaned
+				if errMsg != "" {
+					a.NewPeerURLError = errMsg
+					c.Toast(errMsg)
+					return
+				}
+				a.NewPeerURLError = ""
+				rawURL := cleaned
 				peerID := strings.TrimSpace(a.NewPeerID)
 				alias := strings.TrimSpace(a.NewPeerAlias)
 
@@ -52,6 +69,7 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				if peerID != "" {
 					_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
 					a.NewPeerURL = ""
+					a.NewPeerURLError = ""
 					a.NewPeerID = ""
 					a.NewPeerAlias = ""
 					a.AddPeerModalOpen = false

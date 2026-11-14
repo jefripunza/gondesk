@@ -1,6 +1,9 @@
 package uiapp
 
 import (
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"gondesk/internal/config"
@@ -47,6 +50,7 @@ type AppUI struct {
 	// Add Peer Modal state
 	AddPeerModalOpen bool
 	NewPeerURL       string
+	NewPeerURLError  string
 	NewPeerID        string
 	NewPeerAlias     string
 
@@ -172,4 +176,101 @@ func CleanURL(raw string) string {
 		s = strings.TrimSuffix(s, "/")
 	}
 	return s
+}
+
+// ValidateHostURL validates that raw is strictly an IP or domain address (with optional port)
+// without any path/endpoint, query, or fragment.
+// It returns the cleaned URL and an error message string (empty if valid).
+func ValidateHostURL(raw string) (string, string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", ""
+	}
+
+	cleaned := CleanURL(trimmed)
+	u, err := url.Parse(cleaned)
+	if err != nil {
+		return cleaned, "Format URL tidak valid"
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return cleaned, "Skema URL harus http:// atau https://"
+	}
+
+	if u.Path != "" && u.Path != "/" {
+		return cleaned, "URL tidak boleh berisi path atau endpoint (hanya IP atau domain, contoh: https://host:8443)"
+	}
+
+	if u.RawQuery != "" || u.Fragment != "" {
+		return cleaned, "URL tidak boleh berisi query atau fragment"
+	}
+
+	if u.Host == "" {
+		return cleaned, "Alamat IP atau domain tidak valid"
+	}
+
+	hostname := u.Hostname()
+	portStr := u.Port()
+
+	if portStr != "" {
+		portNum, err := strconv.Atoi(portStr)
+		if err != nil || portNum < 1 || portNum > 65535 {
+			return cleaned, "Port tidak valid (1-65535)"
+		}
+	}
+
+	if ip := net.ParseIP(hostname); ip != nil {
+		return cleaned, ""
+	}
+
+	if !isValidDomainOrHostname(hostname) {
+		return cleaned, "Alamat IP atau domain tidak valid"
+	}
+
+	return cleaned, ""
+}
+
+// isValidDomainOrHostname checks whether h is a syntactically valid domain or hostname.
+// Numeric TLDs (e.g. 192.168.1.300) are rejected as invalid domains.
+func isValidDomainOrHostname(h string) bool {
+	h = strings.TrimSuffix(h, ".")
+	if len(h) == 0 || len(h) > 253 {
+		return false
+	}
+	if strings.ContainsAny(h, " /\\:@?#") {
+		return false
+	}
+
+	labels := strings.Split(h, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+				return false
+			}
+		}
+	}
+
+	lastLabel := labels[len(labels)-1]
+	allDigits := true
+	for i := 0; i < len(lastLabel); i++ {
+		if lastLabel[i] < '0' || lastLabel[i] > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if len(labels) > 1 && allDigits {
+		return false
+	}
+	if len(labels) == 1 && allDigits {
+		return false
+	}
+
+	return true
 }

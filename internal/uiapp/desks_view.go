@@ -21,6 +21,7 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 			ui.Spacer(c)
 			ui.SearchField(c.Key("peer-search"), &a.SearchQuery).Placeholder("Search ID or alias...").Width(240)
 			if ui.Button(c, "+ Add Desk").Clicked() {
+				a.NewPeerURLError = ""
 				a.AddPeerModalOpen = true
 			}
 		})
