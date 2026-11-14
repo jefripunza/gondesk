@@ -79,7 +79,14 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧭 2. Aturan Arsitektur Single-Port (`:8443`)
+## 📄 4. Penamaan File Rules: HANYA `AGENT.md` (Dilarang Ada `AGENTS.md`)
+> **Aturan Mutlak:** File dokumentasi aturan untuk AI Agent di proyek ini **HANYA BOLEH BERNAMA `AGENT.md`** (singular).
+> **DILARANG KERAS** membuat, menduplikasi, atau menyalin file menjadi `AGENTS.md` (plural) di dalam repository ini.
+> Jika file `AGENTS.md` ditemukan, file tersebut **wajib segera dihapus**. Seluruh aturan proyek hanya boleh dicatat, dirujuk, dan diperbarui di file `AGENT.md`.
+
+---
+
+## 🧭 5. Aturan Arsitektur Single-Port (`:8443`)
 
 1. **Hanya 1 Nomor Port Jaringan**:
    - Seluruh protokol (**HTTPS REST API**, **WebSocket Signaling `/ws/signal`**, **TURNS TLS/TCP**, dan **STUN/TURN UDP**) harus berjalan di port tunggal yang sama (`cfg.ListenPort`, default `:8443`).
@@ -89,7 +96,7 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🔀 3. Aturan Dual-Mode (`desktop` vs `server`)
+## 🔀 6. Aturan Dual-Mode (`desktop` vs `server`)
 
 1. **Satu Kode Sumber (Single Codebase)**:
    - Mode `desktop` dan `server` dikompilasi dari kode sumber yang sama.
@@ -99,7 +106,7 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🎨 4. Aturan MyGo Native UI (`github.com/egoist/mygo/ui`)
+## 🎨 7. Aturan MyGo Native UI (`github.com/egoist/mygo/ui`)
 
 1. **Larangan Menyimpan `ui.Element` dan `*ui.Context`**:
    - Dilarang menyimpan `ui.Element` atau `*ui.Context` ke dalam struct aplikasi, package variable, atau goroutine. State aplikasi hanya boleh berupa data primitif (`string`, `bool`, `int`), slice model SQLite, dan pointer window `*mygo.Window`.
@@ -112,7 +119,7 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧪 5. Prosedur Verifikasi Sebelum Commit
+## 🧪 8. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
