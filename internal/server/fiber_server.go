@@ -18,7 +18,7 @@ import (
 
 // SignalMessage is the real-time envelope sent over WebSocket (/ws/signal) on the single HTTPS port.
 type SignalMessage struct {
-	Type        string `json:"type"`                   // "register", "session_request", "session_accept", "session_reject", "chat", "input", "frame", "disconnect"
+	Type        string `json:"type"`                   // "register", "session_request", "session_accept", "session_reject", "session_error", "chat", "input", "frame", "clipboard", "file_offer", "mouse_move", "mouse_click", "cursor_broadcast", "disconnect"
 	SessionUUID string `json:"session_uuid,omitempty"` // unique session identifier
 	FromDeskID  string `json:"from_desk_id"`
 	FromAlias   string `json:"from_alias,omitempty"`
@@ -145,6 +145,18 @@ func (n *UnifiedNode) SendSignalToPeer(msg SignalMessage) bool {
 		return false
 	}
 	return peer.writeJSON(msg) == nil
+}
+
+// BroadcastSignal sends msg to all connected peers except exceptDeskID.
+func (n *UnifiedNode) BroadcastSignal(msg SignalMessage, exceptDeskID string) {
+	n.clientsMu.RLock()
+	defer n.clientsMu.RUnlock()
+	exc := database.NormalizeDeskID(exceptDeskID)
+	for id, peer := range n.clients {
+		if id != exc {
+			_ = peer.writeJSON(msg)
+		}
+	}
 }
 
 func (n *UnifiedNode) registerRoutes() {
@@ -319,18 +331,35 @@ func (n *UnifiedNode) registerRoutes() {
 			}
 
 			// Check if target is a connected WebSocket peer on this bridge
+			handled := false
 			if msg.ToDeskID != "" {
 				if n.SendSignalToPeer(msg) {
-					continue
+					handled = true
 				}
 			}
 
 			// Check if target is this local Desktop instance itself (Direct connection or loopback)
-			localSettings, err := n.Store.GetSettings()
-			if err == nil && (msg.ToDeskID == localSettings.DeskID || msg.ToDeskID == "local") {
-				if n.Cfg.ShowDesktopFeatures() && n.localHandler != nil {
-					n.localHandler(msg)
+			if !handled {
+				localSettings, err := n.Store.GetSettings()
+				if err == nil && (msg.ToDeskID == localSettings.DeskID || msg.ToDeskID == "local") {
+					if n.Cfg.ShowDesktopFeatures() && n.localHandler != nil {
+						n.localHandler(msg)
+						handled = true
+					}
 				}
+			}
+
+			// If target desk is not online on this bridge/node, reply with session_error for session_request
+			if !handled && msg.Type == "session_request" {
+				_ = n.Store.RecordSession(msg.SessionUUID, msg.FromDeskID, msg.ToDeskID, "Single-Port HTTPS/WSS + TURNS", "failed", "Target desk is offline or not reachable")
+				_ = peerConn.writeJSON(SignalMessage{
+					Type:        "session_error",
+					SessionUUID: msg.SessionUUID,
+					FromDeskID:  msg.ToDeskID,
+					ToDeskID:    msg.FromDeskID,
+					Payload:     "Desk tujuan (" + msg.ToDeskID + ") tidak aktif atau belum membuka aplikasi GonDesk",
+					Timestamp:   time.Now().Format("15:04:05"),
+				})
 			}
 		}
 	}))

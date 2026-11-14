@@ -130,28 +130,32 @@ func (a *AppUI) startOutgoingConnection(c *ui.Context, target, password string) 
 		}
 	}
 
-	win := a.OpenRemoteWindow(target, alias)
+	_ = a.OpenRemoteWindow(target, alias)
 	sess, err := a.Manager.ConnectToPeer(target, password)
-	if err != nil {
-		if c != nil {
-			c.Toast("Connect error: " + err.Error())
-		}
-		if win != nil {
-			win.Close()
-		}
-		if a.ActiveWindows != nil {
-			delete(a.ActiveWindows, norm)
-		}
-		return
-	}
-
 	if sw, ok := a.ActiveWindows[norm]; ok {
-		sw.SessionUUID = sess.SessionUUID
+		sw.Password = password
+		if err != nil {
+			sw.Status = "error"
+			sw.ErrorMessage = err.Error()
+		} else if sess != nil {
+			sw.SessionUUID = sess.SessionUUID
+			sw.Status = sess.Status
+			if sess.ErrorMessage != "" {
+				sw.ErrorMessage = sess.ErrorMessage
+			}
+		}
+		if sw.Win != nil {
+			sw.Win.Invalidate()
+		}
 	}
 
 	a.ReloadFromDB()
 	if c != nil {
-		c.Toast("Connecting to " + sess.PeerDeskID + " in new window")
+		if err != nil {
+			c.Toast("Connect error: " + err.Error())
+		} else if sess != nil {
+			c.Toast("Connecting to " + sess.PeerDeskID + " in new window")
+		}
 	}
 }
 

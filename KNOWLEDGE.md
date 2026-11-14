@@ -332,37 +332,52 @@ sequenceDiagram
     autonumber
     actor ClientUser as Pengguna A (Me-remote)
     participant AppA as GonDesk Desktop A
-    participant Bridge as Single-Port Bridge (:8443)
+    participant NewWin as Remote Window (New Window)
+    participant Bridge as Single-Port Bridge / Target B (:8443)
     participant AppB as GonDesk Desktop B
     actor HostUser as Pengguna B (Di-remote)
 
-    ClientUser->>AppA: Klik "Connect" pada Desk B (di Remote Desk / Discovered Desks)
-    AppA->>AppA: Buat ActiveSession (status="connected") & Catat di SQLite
+    ClientUser->>AppA: Klik "Connect" pada Desk B
+    AppA->>NewWin: OpenRemoteWindow() -> Buka Jendela Baru (Layar Hitam: "Connecting ...")
+    AppA->>AppA: Ubah Tombol di Jendela Utama menjadi "Disconnect"
     AppA->>Bridge: WSS SignalMessage {type: "session_request", from: DeskA, to: DeskB}
-    Bridge->>Bridge: Catat SessionLog (status="requested") di SQLite
-    Bridge->>AppB: Forward SignalMessage {type: "session_request"} via WSS
 
-    alt Unattended Password Cocok
-        AppB->>AppB: Auto-Accept Incoming Session
-    else Memerlukan Persetujuan Manual
-        AppB-->>HostUser: Tampilkan Banner "INCOMING SESSION"
-        HostUser->>AppB: Klik "Accept & Share Screen"
+    alt Desk B Tidak Membuka Aplikasi / Offline
+        Bridge-->>AppA: SignalMessage {type: "session_error", payload: "Desk tujuan tidak aktif"}
+        AppA->>NewWin: Update Status -> "error" (Pesan Error + Tombol "Reconnect")
+        Note over NewWin: Jendela baru TETAP TERBUKA!<br/>Pengguna dapat klik "Reconnect" untuk mencoba lagi
+        ClientUser->>NewWin: Klik "Reconnect"
+        NewWin->>AppA: Reset Status -> "connecting" & Ulangi Koneksi
+    else Desk B Membuka Aplikasi & Online
+        Bridge->>AppB: Forward SignalMessage {type: "session_request"} via WSS
+        alt Unattended Password Cocok
+            AppB->>AppB: Auto-Accept Incoming Session
+        else Memerlukan Persetujuan Manual
+            AppB-->>HostUser: Tampilkan Banner "INCOMING SESSION"
+            HostUser->>AppB: Klik "Accept & Share Screen"
+        end
+
+        AppB->>Bridge: WSS SignalMessage {type: "session_accept", session_uuid}
+        Bridge->>AppA: Forward SignalMessage {type: "session_accept"}
+        AppA->>NewWin: Update Status -> "connected"
+        Note over NewWin: Muncul Top Poni Panel (Draggable Grip ⠿)<br/>+ Canvas Multi-Cursor (N Peserta Dinamis)
+
+        par Kolaborasi Multi-Cursor, Clipboard & File Transfer (1 Port :8443)
+            ClientUser->>NewWin: Geser Grip Poni (⠿) Horizontal
+            ClientUser->>NewWin: Klik "📋 Send Clipboard"
+            NewWin->>AppB: WSS SignalMessage {type: "clipboard", payload: text}
+            ClientUser->>NewWin: Klik "📁 Send File" (Native File Dialog)
+            NewWin->>AppB: WSS SignalMessage {type: "file_offer", payload: file}
+            ClientUser->>NewWin: Gerakkan / Klik Mouse pada Canvas
+            NewWin->>Bridge: Sinyal mouse_move & mouse_click (NormX, NormY)
+            Bridge->>AppB: Jalankan Input Mouse pada Host
+            Bridge-->>NewWin: Broadcast Koordinat Kursor Semua Peserta (Warna Adaptif Unik)
+        end
+
+        ClientUser->>NewWin: Klik "Disconnect" (atau via Jendela Utama)
+        AppA->>Bridge: WSS SignalMessage {type: "disconnect", session_uuid}
+        AppA->>NewWin: Close Window & Reset Tombol Utama -> "Connect"
     end
-
-    AppB->>Bridge: WSS SignalMessage {type: "session_accept", session_uuid}
-    Bridge->>Bridge: Update SessionLog (status="active")
-    Bridge->>AppA: Forward SignalMessage {type: "session_accept"}
-
-    par Interaksi Layar, Input & Chat Real-Time (1 Port :8443)
-        ClientUser->>AppA: Klik Viewport / Kirim Ctrl+Alt+Del / Sync Clipboard / Chat
-        AppA->>Bridge: WSS SignalMessage {type: "input" | "chat", payload}
-        Bridge->>AppB: Forward SignalMessage ke Host B
-        AppB-->>HostUser: Perbarui Viewport & Log Sesi
-    end
-
-    ClientUser->>AppA: Klik "Disconnect"
-    AppA->>Bridge: WSS SignalMessage {type: "disconnect", session_uuid}
-    Bridge->>Bridge: Update SessionLog (status="completed", ended_at=now)
 ```
 
 ---
@@ -433,27 +448,25 @@ Antarmuka pengguna dibangun menggunakan deklarasi *immediate-mode* `github.com/e
 
 ```mermaid
 flowchart TD
-    Root["AppUI.View(c *ui.Context)\nTheme Accent: #EF443B (AnyDesk Coral Red)"] --> TopBar["renderTopBar\n• Logo & Mode Label\n• Navigation Tabs (New Connection, Active Sessions, Settings)\n• Badge 1-Port Status (:%d)\n• Button Switch Mode (Desktop <-> Server)"]
+    Root["AppUI.View(c *ui.Context)\nTheme Accent: #EF443B (AnyDesk Coral Red)"] --> TopBar["renderTopBar (header.go)\n• Identitas Brand GonDesk\n• Your Address (9-digit ID Clickable Copy)\n• Tombol Pengaturan (Settings)"]
 
-    Root --> ModeBranch{"a.Cfg.IsServerMode()?"}
-
-    ModeBranch -->|"Ya (Mode: server)"| ServerDash["renderServerBridgeDashboard\n(Seluruh Fitur Desktop Di-hide)"]
-    ServerDash --> SrvBanner["Header Global Bridge & Refresh SQLite"]
-    ServerDash --> SrvMetrics["4 Metric Cards\n(Single Port, Online Desks, HTTPS/WSS Conns, Pion TURN Traffic)"]
-    ServerDash --> SrvPeers["Global Peer Registry (GORM SQLite)"]
-    ServerDash --> SrvTurnAndLogs["Pion TURN Credentials Form + Global Bridge Relay Logs"]
-
-    ModeBranch -->|"Tidak (Mode: desktop)"| IncomingCheck{"Ada IncomingPrompt?"}
-    IncomingCheck -->|"Ya"| IncomingBanner["renderIncomingBanner\n(Accept & Share Screen / Reject)"]
+    Root --> IncomingCheck{"Ada IncomingPrompt?"}
+    IncomingCheck -->|"Ya"| IncomingBanner["renderIncomingBanner (banner.go)\n(Accept & Share Screen / Reject)"]
     IncomingCheck -->|"Tidak / Lanjut"| TabBranch{"a.ActiveTab"}
 
-    TabBranch -->|"Tab == 0 (Home)"| MainSplit["renderDesktopMainSplit (ui.Split)"]
-    MainSplit --> LeftPane["renderLeftThisDeskPane (Panel Kiri)\n1. Card 'Your Address' (9-Digit ID + Copy Address)\n2. Card Quick Connect:\n   • Input Name (optional)\n   • Input URL (http / https wajib)\n   • Button Connect -> Masuk ke List Kanan"]
-    MainSplit --> RightPane["renderRightRemoteDeskPane (Panel Kanan)\n1. Filter Tabs (All Desks / Favorites / Online + Search + Add Desk)\n2. Daftar Kartu Peer (Badge ONLINE/OFFLINE, Star Favorite, Button Connect)"]
+    TabBranch -->|"Tab == 0 (Home)"| DesksView["renderDesksView (desks_view.go)\n1. Filter Tabs (All Desks / Favorites / Online) + Search + Add Desk\n2. Peer Cards List (Badge ONLINE/OFFLINE, Favorite, Edit, Trash, Connect/Disconnect)"]
 
-    TabBranch -->|"Tab == 1 (Settings)"| SettingsView["renderDesktopSettings\n• Device Alias\n• Global Bridge Server URL\n• Save & Reconnect Bridge"]
+    TabBranch -->|"Tab == 1 (Settings)"| SettingsView["renderDesktopSettings (settings.go)\n• Sidebar: General, Network, About\n• Alias, Unattended Access, Bridge Server URL"]
 
-    TabBranch -->|"Tab >= 2 (Active Session)"| SessionView["renderActiveSessionView\n• Session Header (Ctrl+Alt+Del, Sync Clipboard, Disconnect)\n• GPU Custom Drawn Remote Screen Canvas (ui.Painter)\n• Live Session Chat & Telemetry Sidebar"]
+    DesksView -->|"Klik Connect"| RemoteWin["OpenRemoteWindow (remote_window.go)\n(Jendela Baru Terpisah / New Window)"]
+
+    RemoteWin --> WinState{"Status Jendela Remote"}
+    WinState -->|"connecting"| WinConnecting["Layar Hitam: 'Connecting ...'"]
+    WinState -->|"error (Target Offline)"| WinError["Layar Hitam: 'Connection Failed'\n• Pesan Error Deskripsi\n• Tombol 'Reconnect' (Mencoba Ulang)"]
+    WinState -->|"connected"| WinConnected["Layar Remote Desktop Aktif"]
+
+    WinConnected --> PoniToolbar["Top Poni / Notch Panel (Floating Center)\n• Draggable Grip (⠿) (Bisa digeser horizontal via handle.Dragged())\n• Tombol '📋 Send Clipboard'\n• Tombol '📁 Send File'\n• Tombol 'Disconnect'"]
+    WinConnected --> CanvasViewport["Remote Canvas Viewport (DrawOver)\n• Input Pointer Tracking (mouse_move & mouse_click)\n• Multi-Cursor Dinamis (N Peserta Tanpa Batasan Angka 3)\n  - Warna Kursor Kontras Unik per Peserta (Palet Adaptif)\n  - Panah Mouse + Tag Nama/ID + Efek Ripple Klik"]
 ```
 
 ### Aturan Penting MyGo Native UI yang Diterapkan

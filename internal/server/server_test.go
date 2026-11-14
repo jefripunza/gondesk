@@ -129,3 +129,27 @@ func TestSignalMessageEnvelope(t *testing.T) {
 		t.Fatalf("unexpected decoded SignalMessage: %+v", decoded)
 	}
 }
+
+func TestBroadcastSignalAndPeerSend(t *testing.T) {
+	node, _ := setupTestNode(t)
+	defer func() { _ = node.Stop() }()
+
+	msg := SignalMessage{
+		Type:        "cursor_broadcast",
+		SessionUUID: "session-broad-test",
+		FromDeskID:  "111 222 333",
+		ToDeskID:    "999 999 999",
+		Payload:     `{"norm_x":0.5,"norm_y":0.5}`,
+	}
+
+	// Sending to non-existent peer should return false safely
+	if node.SendSignalToPeer(msg) {
+		t.Fatalf("expected SendSignalToPeer to return false for non-connected peer")
+	}
+
+	// BroadcastSignal to empty client map should not panic
+	node.BroadcastSignal(msg, "111 222 333")
+	if count := node.OnlinePeerCount(); count != 0 {
+		t.Fatalf("expected 0 online peers, got %d", count)
+	}
+}

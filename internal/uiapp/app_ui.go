@@ -119,6 +119,22 @@ func (a *AppUI) ReloadFromDB() {
 
 // NotifyChanged safely schedules a UI state refresh on the main thread.
 func (a *AppUI) NotifyChanged() {
+	if a.Manager != nil && a.ActiveWindows != nil {
+		_, _, _, _, sessions := a.Manager.Snapshot()
+		for i := range sessions {
+			s := &sessions[i]
+			norm := database.NormalizeDeskID(s.PeerDeskID)
+			if sw, ok := a.ActiveWindows[norm]; ok {
+				sw.Status = s.Status
+				if s.ErrorMessage != "" {
+					sw.ErrorMessage = s.ErrorMessage
+				}
+				if sw.Win != nil {
+					sw.Win.Update(func() {})
+				}
+			}
+		}
+	}
 	if a.Win != nil {
 		a.Win.Update(func() {
 			a.ReloadFromDB()

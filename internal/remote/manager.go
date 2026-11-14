@@ -18,24 +18,62 @@ import (
 	"gondesk/internal/database"
 	"gondesk/internal/server"
 
+	"github.com/egoist/mygo"
 	"github.com/fasthttp/websocket"
 	"github.com/google/uuid"
 	"github.com/pion/stun/v3"
 )
 
+// CursorColorPalette provides visually distinct, high-contrast colors for dynamic multi-cursor collaboration.
+var CursorColorPalette = []string{
+	"#3B82F6", // Blue
+	"#10B981", // Green
+	"#F59E0B", // Amber
+	"#8B5CF6", // Purple
+	"#EC4899", // Pink
+	"#06B6D4", // Cyan
+	"#F97316", // Orange
+	"#6366F1", // Indigo
+	"#14B8A6", // Teal
+	"#E11D48", // Rose
+}
+
+// GetCursorColor returns a distinct color for the participant desk ID based on palette cycling or index.
+func GetCursorColor(index int) string {
+	if len(CursorColorPalette) == 0 {
+		return "#3B82F6"
+	}
+	return CursorColorPalette[index%len(CursorColorPalette)]
+}
+
+// RemoteCursor represents a participant's cursor position and metadata in a collaborative remote session.
+type RemoteCursor struct {
+	DeskID     string    `json:"desk_id"`
+	Alias      string    `json:"alias"`
+	Color      string    `json:"color"`
+	NormX      float32   `json:"norm_x"`
+	NormY      float32   `json:"norm_y"`
+	LastAction string    `json:"last_action"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // ActiveSession represents a live remote desktop session (either outgoing client or incoming host).
 type ActiveSession struct {
-	SessionUUID string
-	PeerDeskID  string
-	PeerAlias   string
-	Direction   string // "outgoing" (Me-remote) or "incoming" (Di-remote)
-	Transport   string // "Single-Port HTTPS/WSS + TURNS (:8443)"
-	Status      string // "connecting", "connected", "rejected"
-	StartedAt   time.Time
-	LatencyMs   int
-	ChatLog     []string
-	LastInput   string
-	FrameTick   int
+	SessionUUID     string
+	PeerDeskID      string
+	PeerAlias       string
+	Direction       string // "outgoing" (Me-remote) or "incoming" (Di-remote)
+	Transport       string // "Single-Port HTTPS/WSS + TURNS (:8443)"
+	Status          string // "connecting", "connected", "error", "rejected"
+	ErrorMessage    string
+	EndpointURL     string
+	StartedAt       time.Time
+	LatencyMs       int
+	ChatLog         []string
+	FileTransferLog []string
+	Participants    map[string]*RemoteCursor
+	LastInput       string
+	FrameTick       int
 }
 
 // IncomingPrompt represents a pending incoming remote control request waiting for user approval.
@@ -215,13 +253,28 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	case "session_accept":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID == msg.SessionUUID || s.PeerDeskID == msg.FromDeskID {
-				s.Status = "connected"
-				if msg.FromAlias != "" {
-					s.PeerAlias = msg.FromAlias
-				}
-				s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Connected to %s via Single-Port HTTPS + TURN", time.Now().Format("15:04:05"), msg.FromDeskID))
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
 			}
+			s.Status = "connected"
+			if msg.FromAlias != "" {
+				s.PeerAlias = msg.FromAlias
+			}
+			if s.Participants == nil {
+				s.Participants = make(map[string]*RemoteCursor)
+			}
+			if _, ok := s.Participants[msg.FromDeskID]; !ok {
+				s.Participants[msg.FromDeskID] = &RemoteCursor{
+					DeskID:     msg.FromDeskID,
+					Alias:      s.PeerAlias,
+					Color:      GetCursorColor(len(s.Participants)),
+					NormX:      0.5,
+					NormY:      0.5,
+					LastAction: "connected",
+					UpdatedAt:  time.Now(),
+				}
+			}
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Connected to %s via Single-Port HTTPS + TURN", time.Now().Format("15:04:05"), msg.FromDeskID))
 		}
 		m.mu.Unlock()
 		m.notify()
@@ -229,9 +282,102 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	case "session_reject":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID == msg.SessionUUID || s.PeerDeskID == msg.FromDeskID {
-				s.Status = "rejected"
-				s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Connection declined by remote host", time.Now().Format("15:04:05")))
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
+			}
+			s.Status = "error"
+			s.ErrorMessage = "Koneksi ditolak oleh pengguna host remote"
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), s.ErrorMessage))
+		}
+		m.mu.Unlock()
+		m.notify()
+
+	case "session_error":
+		m.mu.Lock()
+		for _, s := range m.sessions {
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
+			}
+			s.Status = "error"
+			errMsg := msg.Payload
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("Desk tujuan (%s) tidak aktif atau menolak koneksi", msg.FromDeskID)
+			}
+			s.ErrorMessage = errMsg
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Connection Error: %s", time.Now().Format("15:04:05"), errMsg))
+		}
+		m.mu.Unlock()
+		m.notify()
+
+	case "clipboard":
+		m.mu.Lock()
+		for _, s := range m.sessions {
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
+			}
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Remote clipboard received (%d chars): %s", msg.Timestamp, len(msg.Payload), msg.Payload))
+		}
+		m.mu.Unlock()
+		if mygo.App.IsReady() && msg.Payload != "" {
+			mygo.Clipboard.WriteText(msg.Payload)
+		}
+		m.notify()
+
+	case "file_offer":
+		m.mu.Lock()
+		desc := fmt.Sprintf("[%s] Received file from %s: %s", msg.Timestamp, msg.FromDeskID, msg.Payload)
+		for _, s := range m.sessions {
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
+			}
+			s.ChatLog = append(s.ChatLog, desc)
+			s.FileTransferLog = append(s.FileTransferLog, desc)
+		}
+		m.mu.Unlock()
+		m.notify()
+
+	case "mouse_move", "mouse_click":
+		var ev struct {
+			NormX  float32 `json:"norm_x"`
+			NormY  float32 `json:"norm_y"`
+			Button int     `json:"button"`
+			Alias  string  `json:"alias"`
+		}
+		_ = json.Unmarshal([]byte(msg.Payload), &ev)
+		if ev.Alias == "" {
+			ev.Alias = msg.FromAlias
+		}
+		if ev.Alias == "" {
+			ev.Alias = msg.FromDeskID
+		}
+
+		m.mu.Lock()
+		for _, s := range m.sessions {
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
+			}
+			if s.Participants == nil {
+				s.Participants = make(map[string]*RemoteCursor)
+			}
+			cur, ok := s.Participants[msg.FromDeskID]
+			if !ok {
+				cur = &RemoteCursor{
+					DeskID: msg.FromDeskID,
+					Alias:  ev.Alias,
+					Color:  GetCursorColor(len(s.Participants)),
+				}
+				s.Participants[msg.FromDeskID] = cur
+			}
+			cur.NormX = ev.NormX
+			cur.NormY = ev.NormY
+			cur.Alias = ev.Alias
+			cur.UpdatedAt = time.Now()
+			if msg.Type == "mouse_click" {
+				cur.LastAction = "click"
+				s.LastInput = fmt.Sprintf("Remote Click (%s)", ev.Alias)
+				s.FrameTick++
+			} else {
+				cur.LastAction = "move"
 			}
 		}
 		m.mu.Unlock()
@@ -240,9 +386,10 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	case "chat":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID == msg.SessionUUID || s.PeerDeskID == msg.FromDeskID {
-				s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] %s: %s", msg.Timestamp, msg.FromDeskID, msg.Payload))
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
 			}
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] %s: %s", msg.Timestamp, msg.FromDeskID, msg.Payload))
 		}
 		m.mu.Unlock()
 		m.notify()
@@ -250,10 +397,11 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	case "input":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID == msg.SessionUUID || s.PeerDeskID == msg.FromDeskID {
-				s.LastInput = msg.Payload
-				s.FrameTick++
+			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				continue
 			}
+			s.LastInput = msg.Payload
+			s.FrameTick++
 		}
 		m.mu.Unlock()
 		m.notify()
@@ -274,10 +422,16 @@ func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSessio
 	sessionID := uuid.NewString()[:12]
 
 	alias := "Remote " + target
+	endpointURL := ""
 	if peers, err := m.Store.ListPeers(); err == nil {
 		for _, p := range peers {
-			if p.DeskID == target && p.Alias != "" {
-				alias = p.Alias
+			if p.DeskID == target {
+				if p.Alias != "" {
+					alias = p.Alias
+				}
+				if p.EndpointURL != "" {
+					endpointURL = p.EndpointURL
+				}
 				break
 			}
 		}
@@ -285,19 +439,29 @@ func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSessio
 
 	transportDesc := fmt.Sprintf("Single-Port HTTPS/WSS + TURNS (:%d)", m.Cfg.ListenPort)
 	sess := &ActiveSession{
-		SessionUUID: sessionID,
-		PeerDeskID:  target,
-		PeerAlias:   alias,
-		Direction:   "outgoing",
-		Transport:   transportDesc,
-		Status:      "connected",
-		StartedAt:   time.Now(),
-		LatencyMs:   14,
-		LastInput:   "Mouse & Keyboard Ready (60 FPS Adaptive)",
+		SessionUUID:  sessionID,
+		PeerDeskID:   target,
+		PeerAlias:    alias,
+		Direction:    "outgoing",
+		Transport:    transportDesc,
+		Status:       "connecting",
+		EndpointURL:  endpointURL,
+		StartedAt:    time.Now(),
+		LatencyMs:    14,
+		LastInput:    "Connecting to remote host...",
+		Participants: make(map[string]*RemoteCursor),
 		ChatLog: []string{
 			fmt.Sprintf("[%s] Dialing %s over Single-Port HTTPS (: %d)...", time.Now().Format("15:04:05"), target, m.Cfg.ListenPort),
-			fmt.Sprintf("[%s] TLS 1.3 + Pion TURN Relay & WSS Channel Ready", time.Now().Format("15:04:05")),
 		},
+	}
+	sess.Participants[st.DeskID] = &RemoteCursor{
+		DeskID:     st.DeskID,
+		Alias:      st.Alias,
+		Color:      GetCursorColor(0),
+		NormX:      0.5,
+		NormY:      0.5,
+		LastAction: "connecting",
+		UpdatedAt:  time.Now(),
 	}
 
 	m.mu.Lock()
@@ -319,10 +483,57 @@ func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSessio
 		Timestamp:   time.Now().Format("15:04:05"),
 	}
 
-	if ws != nil {
+	switch {
+	case ws != nil:
 		_ = ws.WriteJSON(reqMsg)
-	} else if m.Node != nil {
-		m.Node.SendSignalToPeer(reqMsg)
+	case m.Node != nil && m.Node.SendSignalToPeer(reqMsg):
+		// Delivered directly to locally connected peer
+	case endpointURL != "":
+		// Direct dial probe over Single-Port
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			client := &http.Client{
+				Timeout: 2 * time.Second,
+				Transport: &http.Transport{
+					// #nosec G402
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			}
+			infoURL := strings.TrimRight(endpointURL, "/") + "/api/v1/info"
+			resp, err := client.Get(infoURL)
+			if err != nil {
+				m.mu.Lock()
+				sess.Status = "error"
+				sess.ErrorMessage = fmt.Sprintf("Gagal terhubung ke %s: Aplikasi tujuan tidak aktif atau tidak terjangkau", target)
+				sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), sess.ErrorMessage))
+				m.mu.Unlock()
+				m.notify()
+				return
+			}
+			_ = resp.Body.Close()
+
+			m.mu.Lock()
+			sess.Status = "connected"
+			sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] TLS 1.3 + Pion TURN Relay & Direct Channel Ready", time.Now().Format("15:04:05")))
+			if _, ok := sess.Participants[target]; !ok {
+				sess.Participants[target] = &RemoteCursor{
+					DeskID:     target,
+					Alias:      alias,
+					Color:      GetCursorColor(len(sess.Participants)),
+					NormX:      0.5,
+					NormY:      0.5,
+					LastAction: "connected",
+					UpdatedAt:  time.Now(),
+				}
+			}
+			m.mu.Unlock()
+			m.notify()
+		}()
+	default:
+		// Peer not on bridge and no endpoint URL
+		sess.Status = "error"
+		sess.ErrorMessage = fmt.Sprintf("Desk tujuan (%s) tidak aktif atau belum terhubung ke bridge", target)
+		sess.ChatLog = append(sess.ChatLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), sess.ErrorMessage))
 	}
 
 	m.notify()
@@ -364,18 +575,28 @@ func (m *Manager) acceptIncomingSession(sessionUUID, fromDeskID, fromAlias strin
 	}
 	transportDesc := fmt.Sprintf("Single-Port HTTPS/WSS + TURNS (:%d)", m.Cfg.ListenPort)
 	sess := &ActiveSession{
-		SessionUUID: sessionUUID,
-		PeerDeskID:  fromDeskID,
-		PeerAlias:   fromAlias,
-		Direction:   "incoming",
-		Transport:   transportDesc,
-		Status:      "connected",
-		StartedAt:   time.Now(),
-		LatencyMs:   11,
-		LastInput:   "Hosting Screen Share (Incoming Control Allowed)",
+		SessionUUID:  sessionUUID,
+		PeerDeskID:   fromDeskID,
+		PeerAlias:    fromAlias,
+		Direction:    "incoming",
+		Transport:    transportDesc,
+		Status:       "connected",
+		StartedAt:    time.Now(),
+		LatencyMs:    11,
+		LastInput:    "Hosting Screen Share (Incoming Control Allowed)",
+		Participants: make(map[string]*RemoteCursor),
 		ChatLog: []string{
 			fmt.Sprintf("[%s] Accepted incoming session from %s (%s)", time.Now().Format("15:04:05"), fromAlias, fromDeskID),
 		},
+	}
+	sess.Participants[fromDeskID] = &RemoteCursor{
+		DeskID:     fromDeskID,
+		Alias:      fromAlias,
+		Color:      GetCursorColor(0),
+		NormX:      0.5,
+		NormY:      0.5,
+		LastAction: "connected",
+		UpdatedAt:  time.Now(),
 	}
 
 	m.mu.Lock()
@@ -521,6 +742,179 @@ func (m *Manager) SendRemoteAction(sessionUUID, action string) {
 	m.notify()
 }
 
+// SendClipboard sends clipboard text to the remote host.
+func (m *Manager) SendClipboard(sessionUUID, text string) {
+	st, _ := m.Store.GetSettings()
+	nowStr := time.Now().Format("15:04:05")
+
+	m.mu.Lock()
+	var peerID string
+	for _, s := range m.sessions {
+		if s.SessionUUID == sessionUUID {
+			peerID = s.PeerDeskID
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Clipboard sent (%d chars)", nowStr, len(text)))
+		}
+	}
+	ws := m.bridgeWS
+	m.mu.Unlock()
+
+	msg := server.SignalMessage{
+		Type:        "clipboard",
+		SessionUUID: sessionUUID,
+		FromDeskID:  st.DeskID,
+		ToDeskID:    peerID,
+		Payload:     text,
+		Timestamp:   nowStr,
+	}
+	if ws != nil {
+		_ = ws.WriteJSON(msg)
+	} else if m.Node != nil {
+		m.Node.SendSignalToPeer(msg)
+	}
+	m.notify()
+}
+
+// SendFile sends a file to the remote peer.
+func (m *Manager) SendFile(sessionUUID, filename string, data []byte) {
+	st, _ := m.Store.GetSettings()
+	nowStr := time.Now().Format("15:04:05")
+
+	m.mu.Lock()
+	var peerID string
+	desc := fmt.Sprintf("[%s] Sent file: %s (%d bytes)", nowStr, filename, len(data))
+	for _, s := range m.sessions {
+		if s.SessionUUID == sessionUUID {
+			peerID = s.PeerDeskID
+			s.ChatLog = append(s.ChatLog, desc)
+			s.FileTransferLog = append(s.FileTransferLog, desc)
+		}
+	}
+	ws := m.bridgeWS
+	m.mu.Unlock()
+
+	payload := fmt.Sprintf("%s|%d", filename, len(data))
+	msg := server.SignalMessage{
+		Type:        "file_offer",
+		SessionUUID: sessionUUID,
+		FromDeskID:  st.DeskID,
+		ToDeskID:    peerID,
+		Payload:     payload,
+		Timestamp:   nowStr,
+	}
+	if ws != nil {
+		_ = ws.WriteJSON(msg)
+	} else if m.Node != nil {
+		m.Node.SendSignalToPeer(msg)
+	}
+	m.notify()
+}
+
+// SendMouseMove broadcasts a normalized mouse move event for multi-cursor collaboration.
+func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
+	st, _ := m.Store.GetSettings()
+	m.mu.Lock()
+	var peerID string
+	for _, s := range m.sessions {
+		if s.SessionUUID != sessionUUID {
+			continue
+		}
+		peerID = s.PeerDeskID
+		if s.Participants == nil {
+			s.Participants = make(map[string]*RemoteCursor)
+		}
+		cur, ok := s.Participants[st.DeskID]
+		if !ok {
+			cur = &RemoteCursor{
+				DeskID: st.DeskID,
+				Alias:  st.Alias,
+				Color:  GetCursorColor(len(s.Participants)),
+			}
+			s.Participants[st.DeskID] = cur
+		}
+		cur.NormX = normX
+		cur.NormY = normY
+		cur.LastAction = "move"
+		cur.UpdatedAt = time.Now()
+	}
+	ws := m.bridgeWS
+	m.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{
+		"norm_x": normX,
+		"norm_y": normY,
+		"alias":  st.Alias,
+	})
+	msg := server.SignalMessage{
+		Type:        "mouse_move",
+		SessionUUID: sessionUUID,
+		FromDeskID:  st.DeskID,
+		FromAlias:   st.Alias,
+		ToDeskID:    peerID,
+		Payload:     string(payload),
+		Timestamp:   time.Now().Format("15:04:05"),
+	}
+	if ws != nil {
+		_ = ws.WriteJSON(msg)
+	} else if m.Node != nil {
+		m.Node.SendSignalToPeer(msg)
+	}
+}
+
+// SendMouseClick broadcasts a normalized mouse click event for multi-cursor collaboration.
+func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, button int) {
+	st, _ := m.Store.GetSettings()
+	m.mu.Lock()
+	var peerID string
+	for _, s := range m.sessions {
+		if s.SessionUUID != sessionUUID {
+			continue
+		}
+		peerID = s.PeerDeskID
+		if s.Participants == nil {
+			s.Participants = make(map[string]*RemoteCursor)
+		}
+		cur, ok := s.Participants[st.DeskID]
+		if !ok {
+			cur = &RemoteCursor{
+				DeskID: st.DeskID,
+				Alias:  st.Alias,
+				Color:  GetCursorColor(len(s.Participants)),
+			}
+			s.Participants[st.DeskID] = cur
+		}
+		cur.NormX = normX
+		cur.NormY = normY
+		cur.LastAction = "click"
+		cur.UpdatedAt = time.Now()
+		s.LastInput = fmt.Sprintf("Click (%s at %.2f, %.2f)", st.Alias, normX, normY)
+		s.FrameTick++
+	}
+	ws := m.bridgeWS
+	m.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{
+		"norm_x": normX,
+		"norm_y": normY,
+		"button": button,
+		"alias":  st.Alias,
+	})
+	msg := server.SignalMessage{
+		Type:        "mouse_click",
+		SessionUUID: sessionUUID,
+		FromDeskID:  st.DeskID,
+		FromAlias:   st.Alias,
+		ToDeskID:    peerID,
+		Payload:     string(payload),
+		Timestamp:   time.Now().Format("15:04:05"),
+	}
+	if ws != nil {
+		_ = ws.WriteJSON(msg)
+	} else if m.Node != nil {
+		m.Node.SendSignalToPeer(msg)
+	}
+	m.notify()
+}
+
 // Snapshot returns thread-safe copies of the manager's status for rendering in MyGo Native UI.
 func (m *Manager) Snapshot() (bridgeOnline, turnReachable bool, turnMapped string, incoming *IncomingPrompt, sessions []ActiveSession) {
 	m.mu.Lock()
@@ -536,6 +930,14 @@ func (m *Manager) Snapshot() (bridgeOnline, turnReachable bool, turnMapped strin
 	for i, s := range m.sessions {
 		cp := *s
 		cp.ChatLog = append([]string(nil), s.ChatLog...)
+		cp.FileTransferLog = append([]string(nil), s.FileTransferLog...)
+		if s.Participants != nil {
+			cp.Participants = make(map[string]*RemoteCursor, len(s.Participants))
+			for k, v := range s.Participants {
+				vCopy := *v
+				cp.Participants[k] = &vCopy
+			}
+		}
 		sessions[i] = cp
 	}
 	return

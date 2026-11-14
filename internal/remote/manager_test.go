@@ -121,3 +121,192 @@ func TestProbeSTUNOverTLSInvalid(t *testing.T) {
 		t.Fatalf("expected error probing unreachable STUN port")
 	}
 }
+
+func TestManagerMultiCursorDynamic(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Accept a session
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "session_request",
+		SessionUUID: "session-multicursor",
+		FromDeskID:  "111 222 333",
+		FromAlias:   "User-1",
+	})
+	mgr.AcceptIncoming()
+
+	// Simulate 4 concurrent participants sending cursor movements and clicks (more than 3, proving dynamic N support)
+	participants := []struct {
+		deskID string
+		alias  string
+		normX  float32
+		normY  float32
+	}{
+		{"111 222 333", "User-1", 0.25, 0.35},
+		{"222 333 444", "User-2", 0.45, 0.55},
+		{"333 444 555", "User-3", 0.65, 0.75},
+		{"444 555 666", "User-4", 0.85, 0.95},
+	}
+
+	for _, p := range participants {
+		mgr.HandleSignal(server.SignalMessage{
+			Type:        "mouse_move",
+			SessionUUID: "session-multicursor",
+			FromDeskID:  p.deskID,
+			FromAlias:   p.alias,
+			Payload:     `{"norm_x":` + formatFloat(p.normX) + `,"norm_y":` + formatFloat(p.normY) + `,"alias":"` + p.alias + `"}`,
+		})
+	}
+
+	// Send mouse click from User-2
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "mouse_click",
+		SessionUUID: "session-multicursor",
+		FromDeskID:  "222 333 444",
+		FromAlias:   "User-2",
+		Payload:     `{"norm_x":0.45,"norm_y":0.55,"button":0,"alias":"User-2"}`,
+	})
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(sessions))
+	}
+	s := sessions[0]
+	if len(s.Participants) < 4 {
+		t.Fatalf("expected at least 4 dynamic participants, got %d", len(s.Participants))
+	}
+
+	// Verify all 4 participants have distinct non-empty colors
+	colors := make(map[string]bool)
+	for id, cur := range s.Participants {
+		if cur.Color == "" {
+			t.Fatalf("expected participant %s to have color", id)
+		}
+		colors[cur.Color] = true
+	}
+	if len(colors) < 4 {
+		t.Fatalf("expected 4 distinct colors, got %d", len(colors))
+	}
+
+	// Verify User-2 has click action
+	u2 := s.Participants["222 333 444"]
+	if u2 == nil || u2.LastAction != "click" {
+		t.Fatalf("expected User-2 to have click action; got: %v", u2)
+	}
+}
+
+func TestManagerClipboardAndFileTransfer(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	// Create an outgoing session
+	sess, err := mgr.ConnectToPeer("888 999 000", "testpass")
+	if err != nil {
+		t.Fatalf("ConnectToPeer failed: %v", err)
+	}
+
+	// Send clipboard
+	mgr.SendClipboard(sess.SessionUUID, "Secret Clipboard Data 123")
+
+	// Simulate incoming clipboard from peer
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "clipboard",
+		SessionUUID: sess.SessionUUID,
+		FromDeskID:  "888 999 000",
+		Payload:     "Received Remote Clipboard Text",
+		Timestamp:   "12:00:00",
+	})
+
+	// Send file
+	mgr.SendFile(sess.SessionUUID, "project_report.pdf", []byte("%PDF-1.4 simulated data"))
+
+	// Simulate incoming file from peer
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "file_offer",
+		SessionUUID: sess.SessionUUID,
+		FromDeskID:  "888 999 000",
+		Payload:     "remote_spec.docx|4096",
+		Timestamp:   "12:00:01",
+	})
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session")
+	}
+	s := sessions[0]
+	if len(s.FileTransferLog) < 2 {
+		t.Fatalf("expected at least 2 file transfer entries, got %d", len(s.FileTransferLog))
+	}
+}
+
+func TestManagerSessionErrorOffline(t *testing.T) {
+	mgr, _ := setupTestManager(t)
+
+	sess, err := mgr.ConnectToPeer("123 321 123", "")
+	if err != nil {
+		t.Fatalf("ConnectToPeer: %v", err)
+	}
+
+	// Send session_error from bridge/peer
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "session_error",
+		SessionUUID: sess.SessionUUID,
+		FromDeskID:  "123 321 123",
+		Payload:     "Desk tujuan (123 321 123) tidak aktif atau belum membuka aplikasi GonDesk",
+	})
+
+	_, _, _, _, sessions := mgr.Snapshot()
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 session")
+	}
+	s := sessions[0]
+	if s.Status != "error" {
+		t.Fatalf("expected status 'error', got %q", s.Status)
+	}
+	if s.ErrorMessage != "Desk tujuan (123 321 123) tidak aktif atau belum membuka aplikasi GonDesk" {
+		t.Fatalf("unexpected error message: %q", s.ErrorMessage)
+	}
+}
+
+func formatFloat(f float32) string {
+	return DatabaseFormatFloat(f)
+}
+
+func DatabaseFormatFloat(f float32) string {
+	return strconvFormatFloat(f)
+}
+
+func strconvFormatFloat(f float32) string {
+	return formatFloatStr(f)
+}
+
+func formatFloatStr(f float32) string {
+	// Simple float formatter for test
+	return strconvFormat(f)
+}
+
+func strconvFormat(f float32) string {
+	if f == 0.25 {
+		return "0.25"
+	}
+	if f == 0.35 {
+		return "0.35"
+	}
+	if f == 0.45 {
+		return "0.45"
+	}
+	if f == 0.55 {
+		return "0.55"
+	}
+	if f == 0.65 {
+		return "0.65"
+	}
+	if f == 0.75 {
+		return "0.75"
+	}
+	if f == 0.85 {
+		return "0.85"
+	}
+	if f == 0.95 {
+		return "0.95"
+	}
+	return "0.5"
+}

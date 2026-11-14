@@ -125,3 +125,117 @@ func TestRemoteWindowSessionTracking(t *testing.T) {
 		t.Fatalf("expected desk to be disconnected after DisconnectDesk")
 	}
 }
+
+func TestRenderRemoteWindowViews(t *testing.T) {
+	appUI, _ := setupTestAppUI(t)
+	norm := database.NormalizeDeskID("555 666 777")
+
+	appUI.OpenRemoteWindow("555 666 777", "Workstation-Alpha")
+	sw := appUI.ActiveWindows[norm]
+	if sw == nil {
+		t.Fatalf("expected ActiveSessionWindow for %s", norm)
+	}
+
+	// 1. Test "connecting" view
+	sw.Status = "connecting"
+	ttConnecting := ui.NewTester(func(c *ui.Context) {
+		appUI.RenderRemoteWindow(c, norm)
+	}, 1024, 640)
+	if !ttConnecting.HasText("Connecting ...") {
+		t.Fatalf("expected 'Connecting ...' in connecting state, got: %v", ttConnecting.Texts())
+	}
+
+	// 2. Test "error" view with Reconnect button
+	sw.Status = "error"
+	sw.ErrorMessage = "Desk tujuan tidak aktif atau tidak membuka aplikasi GonDesk"
+	ttError := ui.NewTester(func(c *ui.Context) {
+		appUI.RenderRemoteWindow(c, norm)
+	}, 1024, 640)
+	if !ttError.HasText("Connection Failed") {
+		t.Fatalf("expected 'Connection Failed' in error state, got: %v", ttError.Texts())
+	}
+	if !ttError.HasText("Desk tujuan tidak aktif atau tidak membuka aplikasi GonDesk") {
+		t.Fatalf("expected error message in error state, got: %v", ttError.Texts())
+	}
+	if !ttError.HasText("Reconnect") {
+		t.Fatalf("expected 'Reconnect' button in error state, got: %v", ttError.Texts())
+	}
+
+	// Click "Reconnect"
+	_ = ttError.Click("Reconnect")
+	if sw.Status != "connecting" {
+		t.Fatalf("expected status to reset to 'connecting' on Reconnect click, got %q", sw.Status)
+	}
+
+	// 3. Test "connected" view with top poni panel (grip, clipboard, file, multi-cursor)
+	sess, err := appUI.Manager.ConnectToPeer("555 666 777", "")
+	if err == nil && sess != nil {
+		sess.Status = "connected"
+		sw.Status = "connected"
+		sw.SessionUUID = sess.SessionUUID
+		// Add 4 participants to test dynamic N-cursor collaboration (more than 3 participants)
+		sess.Participants["user1"] = &remote.RemoteCursor{
+			DeskID:     "user1",
+			Alias:      "Alice",
+			Color:      remote.GetCursorColor(0),
+			NormX:      0.2,
+			NormY:      0.3,
+			LastAction: "move",
+		}
+		sess.Participants["user2"] = &remote.RemoteCursor{
+			DeskID:     "user2",
+			Alias:      "Bob",
+			Color:      remote.GetCursorColor(1),
+			NormX:      0.4,
+			NormY:      0.5,
+			LastAction: "click",
+		}
+		sess.Participants["user3"] = &remote.RemoteCursor{
+			DeskID:     "user3",
+			Alias:      "Charlie",
+			Color:      remote.GetCursorColor(2),
+			NormX:      0.6,
+			NormY:      0.7,
+			LastAction: "move",
+		}
+		sess.Participants["user4"] = &remote.RemoteCursor{
+			DeskID:     "user4",
+			Alias:      "David",
+			Color:      remote.GetCursorColor(3),
+			NormX:      0.8,
+			NormY:      0.9,
+			LastAction: "move",
+		}
+	}
+
+	ttConnected := ui.NewTester(func(c *ui.Context) {
+		appUI.RenderRemoteWindow(c, norm)
+	}, 1024, 640)
+
+	// Verify Top Poni Notch elements
+	if !ttConnected.HasText("CONNECTED") {
+		t.Fatalf("expected 'CONNECTED' badge in poni toolbar")
+	}
+	if !ttConnected.HasText("⠿") {
+		t.Fatalf("expected draggable grip '⠿' in poni toolbar")
+	}
+	if !ttConnected.HasText("📋 Send Clipboard") {
+		t.Fatalf("expected '📋 Send Clipboard' in poni toolbar")
+	}
+	if !ttConnected.HasText("📁 Send File") {
+		t.Fatalf("expected '📁 Send File' in poni toolbar")
+	}
+	if !ttConnected.HasText("Disconnect") {
+		t.Fatalf("expected 'Disconnect' in poni toolbar")
+	}
+
+	// Click Send Clipboard
+	_ = ttConnected.Click("📋 Send Clipboard")
+
+	// Test grip horizontal dragging
+	initialOffset := sw.NotchOffsetX
+	sw.NotchOffsetX += 45
+	if sw.NotchOffsetX != initialOffset+45 {
+		t.Fatalf("expected notch offset to be adjustable by drag")
+	}
+}

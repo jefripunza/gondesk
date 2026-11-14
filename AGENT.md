@@ -222,7 +222,31 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
 
 ---
 
-## 🧪 12. Prosedur Verifikasi Sebelum Commit
+## 🖥️ 12. Aturan Remote Window, Top Poni Panel (Draggable Grip), Clipboard, File Transfer & Multi-Cursor Dinamis
+
+1. **State Machine Jendela Baru & Penanganan Error Target Offline**:
+   - **Status `"connecting"`**: Layar hitam pekat (`#000000`) dengan teks putih terpusat `"Connecting ..."`.
+   - **Status `"error"`**: Jendela **DILARANG DITUTUP OTOMATIS** saat koneksi gagal atau lawan belum membuka aplikasi. Jendela wajib tetap terbuka dengan latar hitam, menampilkan judul error `"Connection Failed"`, rincian pesan error deskriptif, dan tombol **`ui.PrimaryButton(c, "Reconnect")`**.
+   - Menekan tombol **"Reconnect"** wajib mereset status jendela kembali ke `"connecting"` dan memicu percobaan sambungan ulang ke remote desk tujuan.
+2. **Top Poni / Notch Panel Mengambang dengan Draggable Grip**:
+   - Di bagian atas tengah jendela sesi remote (`remote_window.go`), terdapat panel mengambang berbentuk kapsul (*poni / notch*) yang mirip *dynamic island*.
+   - Panel memuat pegangan drag (*grip handle* `⠿`) yang **wajib dapat diklik dan digeser secara horizontal** menggunakan `handle.Dragged()` untuk memindahkan letak poni agar tidak menghalangi area kerja pengguna.
+   - Di dalam panel poni terdapat badge status `CONNECTED`, identitas remote desk, tombol **`📋 Send Clipboard`**, tombol **`📁 Send File`**, dan tombol **`Disconnect`**.
+3. **Fitur Send Clipboard & Send File**:
+   - **Send Clipboard**: Membaca teks clipboard lokal (`mygo.Clipboard.ReadText()`) dan mengirimkannya ke remote host via kanal signaling single-port secara instan.
+   - **Send File**: Membuka dialog file bawaan sistem (`mygo.Dialog.Open`), mengirimkan data file ke remote host, dan menampilkan status transfer pada jendela remote.
+4. **Multi-Cursor Dinamis (N Partisipan Tanpa Limit)**:
+   - Aplikasi **TIDAK MEMBATASI HANYA 3 KURSOR**. Sistem secara dinamis mendukung berapa pun jumlah peserta yang me-remote ke host yang sama (2, 3, 4, 5, atau lebih).
+   - Setiap peserta mendapatkan warna kontras unik dari palet adaptif (`CursorColorPalette`).
+   - Pada canvas remote viewport (`canvas.DrawOver`), kursor panah mouse setiap peserta digambar lengkap dengan label nama/ID peserta dan efek ripple klik saat menekan tombol mouse.
+   - **Setiap kursor dari seluruh peserta aktif bekerja secara simultan (*functional & interactive*)** dan mengirimkan event pointer ke host tanpa saling mengunci.
+5. **Dua Topologi Jaringan (Desktop UI+Server & Docker Bridge Server)**:
+   - **Mode Desktop (`desktop`)**: UI + Server single-port (`:8443`). Mendukung koneksi langsung peer-to-peer maupun melalui server bridge.
+   - **Mode Docker Server (`server`)**: Bridge relay murni single-port tanpa UI yang mengumpulkan seluruh desktop ke dalam 1 network dan me-routing sinyal berdasarkan `ToDeskID`. Jika `ToDeskID` sedang tidak terhubung, bridge wajib membalas dengan sinyal `session_error`.
+
+---
+
+## 🧪 13. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
