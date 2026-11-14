@@ -157,6 +157,23 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 
 	// Reopen modal to verify Cancel and backdrop behavior
 	appUI.AddPeerModalOpen = true
+	appUI.NewPeerID = "123123193"
+	ttModal.Frame()
+	if appUI.NewPeerIDPart1 != "123" || appUI.NewPeerIDPart2 != "123" || appUI.NewPeerIDPart3 != "193" {
+		t.Fatalf("expected parts 123 123 193, got %s %s %s", appUI.NewPeerIDPart1, appUI.NewPeerIDPart2, appUI.NewPeerIDPart3)
+	}
+
+	// Verify continuous backspace across segments: deleting in part 3 continues into part 2 and 1
+	appUI.NewPeerIDPart3 = ""
+	appUI.PeerIDReqFocus = 3
+	appUI.NewPeerID = appUI.NewPeerIDPart1 + appUI.NewPeerIDPart2 + appUI.NewPeerIDPart3
+	ttModal.Frame()
+	// Backspace in empty part 3 deletes last digit of part 2
+	ttModal.Key(0, ui.KeyBackspace)
+	ttModal.Frame()
+	if appUI.NewPeerIDPart2 != "12" {
+		t.Fatalf("expected backspace in empty part 3 to delete last digit of part 2; got %q", appUI.NewPeerIDPart2)
+	}
 
 	// Click outside the modal dialog (at top-left backdrop coordinate)
 	ttModal.ClickAt(10, 10)

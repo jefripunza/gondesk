@@ -37,7 +37,7 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 		a.syncPeerID()
 		hasIDContent := a.NewPeerIDPart1 != "" || a.NewPeerIDPart2 != "" || a.NewPeerIDPart3 != ""
 		idBorderColor := t.Border
-		if a.peerIDFocused {
+		if a.PeerIDFocused {
 			idBorderColor = t.Accent
 		}
 
@@ -47,14 +47,14 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 			Background(t.Surface).
 			Border(1, idBorderColor).
 			AlignItems(ui.Center).
-			Gap(14)
+			Gap(8)
 
 		idFieldBox.Children(func() {
-			if !hasIDContent && !a.peerIDFocused {
+			if !hasIDContent && !a.PeerIDFocused {
 				ui.Text(c, "GonDesk ID (e.g. 612 840 193)").FontSize(13).TextColor(t.TextMuted)
 			} else {
 				in1 := ui.TextInputBase(c.Key("modal-peer-id-1"), &a.NewPeerIDPart1).
-					Placeholder("612").Width(44).Font("monospace").FontSize(14)
+					Placeholder("612").Width(28).Font("monospace").FontSize(14)
 				if in1.Changed() {
 					d := FilterOnlyDigits(a.NewPeerIDPart1, 9)
 					if len(d) > 3 {
@@ -62,68 +62,90 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 						if len(d) > 6 {
 							a.NewPeerIDPart2 = d[3:6]
 							a.NewPeerIDPart3 = d[6:]
-							a.peerIDReqFocus = 3
+							a.PeerIDReqFocus = 3
 						} else {
 							a.NewPeerIDPart2 = d[3:]
-							a.peerIDReqFocus = 2
+							a.PeerIDReqFocus = 2
 						}
 					} else {
 						a.NewPeerIDPart1 = d
 						if len(a.NewPeerIDPart1) == 3 {
-							a.peerIDReqFocus = 2
+							a.PeerIDReqFocus = 2
 						}
 					}
 					a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
 				}
 
 				in2 := ui.TextInputBase(c.Key("modal-peer-id-2"), &a.NewPeerIDPart2).
-					Placeholder("840").Width(44).Font("monospace").FontSize(14)
+					Placeholder("840").Width(28).Font("monospace").FontSize(14)
 				if in2.Changed() {
 					d := FilterOnlyDigits(a.NewPeerIDPart2, 6)
 					if len(d) > 3 {
 						a.NewPeerIDPart2 = d[0:3]
 						a.NewPeerIDPart3 = d[3:]
-						a.peerIDReqFocus = 3
+						a.PeerIDReqFocus = 3
 					} else {
 						a.NewPeerIDPart2 = d
 						if len(a.NewPeerIDPart2) == 3 {
-							a.peerIDReqFocus = 3
+							a.PeerIDReqFocus = 3
 						}
 					}
 					a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
 				}
-				if in2.Shortcut(0, ui.KeyBackspace) && a.NewPeerIDPart2 == "" {
-					a.peerIDReqFocus = 1
-				}
+				in2.HandleInput(func(ev ui.InputEvent) bool {
+					if ev.Kind == ui.InputKeyDown && ev.Key == ui.KeyBackspace {
+						if a.NewPeerIDPart2 == "" && len(a.NewPeerIDPart1) > 0 {
+							a.NewPeerIDPart1 = a.NewPeerIDPart1[:len(a.NewPeerIDPart1)-1]
+							a.PeerIDReqFocus = 1
+							a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
+							return true
+						}
+					}
+					return false
+				})
 
 				in3 := ui.TextInputBase(c.Key("modal-peer-id-3"), &a.NewPeerIDPart3).
-					Placeholder("193").Width(44).Font("monospace").FontSize(14)
+					Placeholder("193").Width(28).Font("monospace").FontSize(14)
 				if in3.Changed() {
 					a.NewPeerIDPart3 = FilterOnlyDigits(a.NewPeerIDPart3, 3)
 					a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
 				}
-				if in3.Shortcut(0, ui.KeyBackspace) && a.NewPeerIDPart3 == "" {
-					a.peerIDReqFocus = 2
+				in3.HandleInput(func(ev ui.InputEvent) bool {
+					if ev.Kind == ui.InputKeyDown && ev.Key == ui.KeyBackspace {
+						if a.NewPeerIDPart3 == "" && len(a.NewPeerIDPart2) > 0 {
+							a.NewPeerIDPart2 = a.NewPeerIDPart2[:len(a.NewPeerIDPart2)-1]
+							a.PeerIDReqFocus = 2
+							a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
+							return true
+						}
+					}
+					return false
+				})
+
+				if a.PeerIDReqFocus == 1 {
+					in1.Focus().SetTextSelection(len(a.NewPeerIDPart1), len(a.NewPeerIDPart1))
+					a.PeerIDReqFocus = 0
+				} else if a.PeerIDReqFocus == 2 {
+					in2.Focus().SetTextSelection(len(a.NewPeerIDPart2), len(a.NewPeerIDPart2))
+					a.PeerIDReqFocus = 0
+				} else if a.PeerIDReqFocus == 3 {
+					in3.Focus().SetTextSelection(len(a.NewPeerIDPart3), len(a.NewPeerIDPart3))
+					a.PeerIDReqFocus = 0
 				}
 
-				if a.peerIDReqFocus == 1 {
-					in1.Focus()
-					a.peerIDReqFocus = 0
-				} else if a.peerIDReqFocus == 2 {
-					in2.Focus()
-					a.peerIDReqFocus = 0
-				} else if a.peerIDReqFocus == 3 {
-					in3.Focus()
-					a.peerIDReqFocus = 0
-				}
-
-				a.peerIDFocused = in1.Focused() || in2.Focused() || in3.Focused()
+				a.PeerIDFocused = in1.Focused() || in2.Focused() || in3.Focused()
 			}
 		})
 
-		if idFieldBox.Clicked() && !a.peerIDFocused {
-			a.peerIDFocused = true
-			a.peerIDReqFocus = 1
+		if idFieldBox.Clicked() && !a.PeerIDFocused {
+			a.PeerIDFocused = true
+			if len(a.NewPeerIDPart1) < 3 {
+				a.PeerIDReqFocus = 1
+			} else if len(a.NewPeerIDPart2) < 3 {
+				a.PeerIDReqFocus = 2
+			} else {
+				a.PeerIDReqFocus = 3
+			}
 		}
 
 		ui.TextInput(c.Key("modal-peer-alias"), &a.NewPeerAlias).Placeholder("Alias (e.g. Home-Desktop)")
@@ -136,8 +158,8 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				a.NewPeerIDPart1 = ""
 				a.NewPeerIDPart2 = ""
 				a.NewPeerIDPart3 = ""
-				a.peerIDReqFocus = 0
-				a.peerIDFocused = false
+				a.PeerIDReqFocus = 0
+				a.PeerIDFocused = false
 			}
 			if ui.PrimaryButton(c, "Save Desk").Clicked() {
 				cleaned, errMsg := ValidateHostURL(a.NewPeerURL)
@@ -172,8 +194,8 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 					a.NewPeerIDPart1 = ""
 					a.NewPeerIDPart2 = ""
 					a.NewPeerIDPart3 = ""
-					a.peerIDReqFocus = 0
-					a.peerIDFocused = false
+					a.PeerIDReqFocus = 0
+					a.PeerIDFocused = false
 					a.NewPeerAlias = ""
 					a.AddPeerModalOpen = false
 					a.ReloadFromDB()

@@ -55,8 +55,8 @@ type AppUI struct {
 	NewPeerIDPart1   string
 	NewPeerIDPart2   string
 	NewPeerIDPart3   string
-	peerIDReqFocus   int
-	peerIDFocused    bool
+	PeerIDReqFocus   int
+	PeerIDFocused    bool
 	NewPeerAlias     string
 
 	// Delete confirmation modal state

@@ -26,8 +26,8 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 				a.NewPeerIDPart1 = ""
 				a.NewPeerIDPart2 = ""
 				a.NewPeerIDPart3 = ""
-				a.peerIDReqFocus = 0
-				a.peerIDFocused = false
+				a.PeerIDReqFocus = 0
+				a.PeerIDFocused = false
 				a.AddPeerModalOpen = true
 			}
 		})

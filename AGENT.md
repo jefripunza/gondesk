@@ -90,12 +90,13 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
    - Karakter non-angka (huruf, spasi, simbol) wajib otomatis dibuang/difilter seketika (menggunakan utilitas `FilterOnlyDigits(s, maxLen)`).
 2. **Spacing Setiap 3 Digit Berupa Style Murni (Bukan Karakter Spasi `" "`)**:
    - Tampilan visual setiap 3 digit harus memiliki jeda/jarak yang menyerupai spasi (misalnya `612  840  193`).
+   - Spacing harus pas dan tidak terlalu renggang (gunakan `Width(28)` untuk masing-masing segmen 3 digit monospace dan `Gap(8)` pada layout container `ui.Row`).
    - **DILARANG KERAS** menyisipkan karakter spasi ASCII (`" "`) ke dalam nilai variabel string input!
-   - Spasi antar digit harus berupa **style layout murni** (misalnya `ui.Row` dengan `Gap(14)` yang menampung 3 sub-input `TextInputBase` tanpa border).
+   - Spasi antar digit harus berupa **style layout murni** (3 sub-input `TextInputBase` tanpa border di dalam container `ui.Row` berjarak `Gap(8)`).
    - Nilai variabel `NewPeerID` yang disimpan wajib hanya angka murni tanpa karakter spasi (misal: `"612840193"`).
 3. **Navigasi & Autoflow Input**:
-   - Saat pengguna mengetik hingga 3 digit pada segmen 1, fokus kursor otomatis berpindah ke segmen 2, dan dari segmen 2 ke segmen 3.
-   - Saat tombol Backspace ditekan pada segmen kosong, fokus kursor otomatis kembali ke segmen sebelumnya.
+   - Saat pengguna mengetik hingga 3 digit pada segmen 1, fokus kursor otomatis berpindah ke segmen 2, dan dari segmen 2 ke segmen 3 dengan kursor diletakkan di akhir teks menggunakan `.SetTextSelection(len, len)`.
+   - **Continuous Backspace**: Menggunakan `HandleInput(ev ui.InputEvent)` pada segmen 3 dan segmen 2 untuk menangkap penekanan `KeyBackspace` saat segmen kosong, sehingga penghapusan terus berlanjut mulus ke segmen sebelumnya (dari digit 9 ke 6 ke 1).
    - Operasi paste (tempel teks) secara otomatis memfilter hanya angka dan memecahnya ke masing-masing segmen secara proporsional.
 
 ---
