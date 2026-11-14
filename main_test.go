@@ -44,6 +44,9 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if tt.HasText("Discovered & Saved Desks") {
 		t.Fatalf("expected 'Discovered & Saved Desks' header to be completely removed from UI; got texts: %v", tt.Texts())
 	}
+	if !tt.HasText("340 px") {
+		t.Fatalf("expected left_pane to render width '340 px', got texts: %v", tt.Texts())
+	}
 
 	// Verify connecting via Name (optional) + URL (http/https required) adds to Discovered & Saved Desks list
 	appUI.QuickConnectName = "Kantor-Cabang-Server"

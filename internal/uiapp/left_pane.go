@@ -37,25 +37,14 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 				})
 			})
 
-		// 2. Simple Connect by Name (Optional) & URL (Required http:// or https://) Card
-		ui.Column(c).Padding(16).Gap(10).Radius(10).
-			Background(t.Background).Border(1, t.Border).
-			Children(func() {
-				nameIn := ui.TextInput(c.Key("quick-connect-name"), &a.QuickConnectName).
-					Placeholder("Name (optional)")
-
-				urlIn := ui.TextInput(c.Key("quick-connect-url"), &a.QuickConnectURL).
-					Placeholder("https://host:8443 (http / https required)")
-				if urlIn.FocusLeft() || (a.quickConnectURLFocused && !urlIn.Focused()) {
-					a.QuickConnectURL = CleanURL(a.QuickConnectURL)
-				}
-				a.quickConnectURLFocused = urlIn.Focused()
-
-				connectClicked := ui.PrimaryButton(c, "Connect").FillWidth().Clicked()
-				if connectClicked || nameIn.Submitted() || urlIn.Submitted() {
-					a.ConnectAndAddURLPeer(c)
-				}
-			})
+		// Nilai lebar left_pane di bawah card
+		widthVal := a.LeftPaneWidth
+		if widthVal <= 0 {
+			widthVal = 340
+		}
+		ui.Row(c).Justify(ui.Center).Children(func() {
+			ui.Textf(c, "%.0f px", widthVal).FontSize(13).TextColor(t.TextMuted)
+		})
 	})
 }
 
