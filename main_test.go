@@ -44,6 +44,15 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if tt.HasText("Discovered & Saved Desks") {
 		t.Fatalf("expected 'Discovered & Saved Desks' header to be completely removed from UI; got texts: %v", tt.Texts())
 	}
+	if tt.HasText("New Connection") {
+		t.Fatalf("expected 'New Connection' button to be removed from header; got texts: %v", tt.Texts())
+	}
+	if tt.HasText("1-Port HTTPS + TURN") {
+		t.Fatalf("expected '1-Port HTTPS + TURN' badge to be removed from header; got texts: %v", tt.Texts())
+	}
+	if !tt.HasText("⚙ Settings") {
+		t.Fatalf("expected '⚙ Settings' button on the right; got texts: %v", tt.Texts())
+	}
 	if tt.HasText("340 px") || tt.HasText("280 px") || tt.HasText("490 px") || tt.HasText("81 px") {
 		t.Fatalf("expected width indicator text to be removed; got texts: %v", tt.Texts())
 	}
@@ -175,6 +184,18 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	ttSettings.Frame()
 	if appUI.ActiveTab != 0 {
 		t.Fatalf("expected clicking 'Back to Home' to reset ActiveTab to 0, got %d", appUI.ActiveTab)
+	}
+
+	// Verify clicking ⚙ Settings button toggles settings view
+	ttSettings.Click("⚙ Settings")
+	ttSettings.Frame()
+	if appUI.ActiveTab != 1 {
+		t.Fatalf("expected clicking '⚙ Settings' to set ActiveTab to 1, got %d", appUI.ActiveTab)
+	}
+	ttSettings.Click("⚙ Settings")
+	ttSettings.Frame()
+	if appUI.ActiveTab != 0 {
+		t.Fatalf("expected clicking '⚙ Settings' again to toggle ActiveTab back to 0, got %d", appUI.ActiveTab)
 	}
 
 	// 2. Verify Desktop UI does NOT contain "Switch to Server Mode"

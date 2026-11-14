@@ -20,14 +20,20 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 			Children(func() {
 				ui.Text(c, "Your Address").FontSize(12).TextColor(t.TextMuted)
 
-				// Big AnyDesk-style 9-digit ID
-				ui.Box(c).Padding(10, 12).Radius(8).
+				// Big AnyDesk-style 9-digit ID (clickable to copy)
+				addrBox := ui.Box(c).Padding(10, 12).Radius(8).
 					Background(ui.Hex("#EF443B").Alpha(0.10)).
 					Border(1, ui.Hex("#EF443B").Alpha(0.35)).
+					Cursor(ui.CursorPointer).
+					Tooltip("Click to copy address").
 					Children(func() {
 						ui.Text(c, a.DeskID).FontSize(26).Bold().
 							Font("monospace").TextColor(ui.Hex("#EF443B")).Selectable()
 					})
+				if addrBox.Clicked() {
+					mygo.Clipboard.WriteText(a.DeskID)
+					c.Toast("Copied Your Address: " + a.DeskID)
+				}
 
 				ui.Row(c).Gap(8).Children(func() {
 					if ui.PrimaryButton(c, "Copy Address").Grow(1).Clicked() {

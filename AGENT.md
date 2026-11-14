@@ -75,7 +75,14 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 ---
 
 ## 🚫 3. Larangan Menampilkan Kembali Elemen yang Dihapus Pengguna
-- Jika pengguna telah meminta menghapus suatu elemen antarmuka (misalnya judul teks `"Discovered & Saved Desks"` di atas daftar tab), agen **DILARANG KERAS** memunculkan atau menuliskan kembali elemen tersebut di siklus modifikasi selanjutnya.
+- Jika pengguna telah meminta menghapus suatu elemen antarmuka, agen **DILARANG KERAS** memunculkan atau menuliskan kembali elemen tersebut di siklus modifikasi selanjutnya.
+- Elemen-elemen yang **WAJIB TETAP DIHAPUS**:
+  1. **Judul teks `"Discovered & Saved Desks"`** di atas daftar filter tabs.
+  2. **Badge status `"1-Port HTTPS + TURN"`** di pojok kanan top bar.
+  3. **Tombol tab navigasi `"New Connection"`** di top bar.
+  4. **Tombol mode `"Switch to Server Mode"`** di top bar.
+  5. **Teks indikator angka ukuran sementara (seperti `%.0f px`)** di bawah card.
+  6. **Data seeder dummy / demo peers** di database SQLite.
 
 ---
 
