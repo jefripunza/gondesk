@@ -202,10 +202,10 @@ func (s *Store) SaveSettings(st *AppSetting) error {
 	return s.DB.Save(st).Error
 }
 
-// ListPeers returns all saved/registered peers ordered by favorite and last seen.
+// ListPeers returns all saved/registered peers ordered by most recently connected/seen first.
 func (s *Store) ListPeers() ([]PeerRecord, error) {
 	var peers []PeerRecord
-	err := s.DB.Order("is_favorite DESC, online DESC, last_seen_at DESC").Find(&peers).Error
+	err := s.DB.Order("online DESC, last_seen_at DESC, is_favorite DESC").Find(&peers).Error
 	return peers, err
 }
 

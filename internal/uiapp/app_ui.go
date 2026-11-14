@@ -2,6 +2,8 @@ package uiapp
 
 import (
 	"fmt"
+	"net/url"
+	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +39,10 @@ type AppUI struct {
 	AllowClipboard    bool
 	BridgeURLInput    string
 
+	// Quick Connect URL form in Left Pane (Name optional + HTTP/HTTPS URL required)
+	QuickConnectName string
+	QuickConnectURL  string
+
 	// "Remote Desk" (Me-remote) state bound to controls
 	RemoteTargetInput   string
 	RemotePasswordInput string
@@ -44,6 +50,7 @@ type AppUI struct {
 
 	// Add Peer Modal state
 	AddPeerModalOpen bool
+	NewPeerURL       string
 	NewPeerID        string
 	NewPeerAlias     string
 
@@ -270,19 +277,12 @@ func (a *AppUI) renderDesktopMainSplit(c *ui.Context, t *ui.Theme) {
 }
 
 func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
-	bridgeOnline, turnReachable, turnMapped, _, _ := a.Manager.Snapshot()
-
 	ui.Scroll(c.Key("left-pane-scroll")).Fill().Padding(18).Gap(16).Background(t.Surface).Children(func() {
 		// 1. AnyDesk "This Desk / Your Address" Card
 		ui.Column(c).Padding(16).Gap(10).Radius(10).
 			Background(t.Background).Border(1, t.Border).
 			Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "This Desk").FontSize(13).Bold().TextColor(t.TextMuted).Grow(1)
-					ui.Badge(c, "Host Ready (Di-remote)").Background(ui.Hex("#16A34A").Alpha(0.15)).TextColor(ui.Hex("#16A34A"))
-				})
-
-				ui.Text(c, "Your GonDesk Address").FontSize(12).TextColor(t.TextMuted)
+				ui.Text(c, "Your Address").FontSize(12).TextColor(t.TextMuted)
 
 				// Big AnyDesk-style 9-digit ID
 				ui.Box(c).Padding(10, 12).Radius(8).
@@ -298,59 +298,22 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 						mygo.Clipboard.WriteText(a.DeskID)
 						c.Toast("Copied Your Address: " + a.DeskID)
 					}
-					if ui.Button(c, "Test Incoming").Clicked() {
-						a.Manager.SimulateIncomingRequest()
-					}
 				})
 			})
 
-		// 2. Unattended Access & Host Security Card (SQLite GORM)
+		// 2. Simple Connect by Name (Optional) & URL (Required http:// or https://) Card
 		ui.Column(c).Padding(16).Gap(10).Radius(10).
 			Background(t.Background).Border(1, t.Border).
 			Children(func() {
-				ui.Text(c, "Unattended Access & Permissions").FontSize(14).Bold()
-				ui.Text(c, "Allow other GonDesk apps to connect to this desk using a password:").FontSize(12).TextColor(t.TextMuted)
+				nameIn := ui.TextInput(c.Key("quick-connect-name"), &a.QuickConnectName).
+					Placeholder("Name (optional)")
 
-				ui.Checkbox(c, &a.UnattendedEnabled, "Enable Unattended Access Password")
-				ui.TextInput(c.Key("host-pwd"), &a.AccessPassword).Password().Placeholder("Set unattended password")
+				urlIn := ui.TextInput(c.Key("quick-connect-url"), &a.QuickConnectURL).
+					Placeholder("https://host:8443 (http / https required)")
 
-				ui.Checkbox(c, &a.AllowControl, "Allow remote mouse & keyboard control")
-				ui.Checkbox(c, &a.AllowClipboard, "Allow clipboard synchronization")
-
-				if ui.Button(c, "Save Host Settings (SQLite)").FillWidth().Clicked() {
-					if st, err := a.Store.GetSettings(); err == nil {
-						st.UnattendedEnabled = a.UnattendedEnabled
-						st.AccessPassword = a.AccessPassword
-						st.AllowControl = a.AllowControl
-						st.AllowClipboard = a.AllowClipboard
-						_ = a.Store.SaveSettings(&st)
-						c.Toast("Saved host security settings to SQLite")
-					}
-				}
-			})
-
-		// 3. Single-Port & Global Bridge Status Card
-		ui.Column(c).Padding(16).Gap(8).Radius(10).
-			Background(t.Background).Border(1, t.Border).
-			Children(func() {
-				ui.Text(c, "Single-Port HTTPS & TURN Bridge").FontSize(14).Bold()
-				ui.Textf(c, "Single Port: :%d (TCP/TLS + UDP)", a.Cfg.ListenPort).FontSize(12)
-				ui.Textf(c, "Local HTTPS: %s", a.Cfg.LocalHTTPSURL()).FontSize(12).TextColor(t.TextMuted)
-				ui.Textf(c, "Pion TURN URI: %s", a.Cfg.TurnURI()).FontSize(12).TextColor(t.TextMuted)
-
-				wsStatus := "Connected via WSS"
-				if !bridgeOnline {
-					wsStatus = "Local Standalone Ready"
-				}
-				ui.Textf(c, "Signaling Channel: %s", wsStatus).FontSize(12)
-
-				if turnReachable {
-					ui.Textf(c, "STUN/TURN Verified: %s", turnMapped).FontSize(12).TextColor(ui.Hex("#16A34A"))
-				}
-
-				if ui.Button(c, "Reconnect Bridge & Verify TURN").FillWidth().Clicked() {
-					go a.Manager.ReconnectBridge()
-					c.Toast("Reconnecting to Single-Port Bridge Server...")
+				connectClicked := ui.PrimaryButton(c, "Connect").FillWidth().Clicked()
+				if connectClicked || nameIn.Submitted() || urlIn.Submitted() {
+					a.ConnectAndAddURLPeer(c)
 				}
 			})
 	})
@@ -358,32 +321,7 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 
 func (a *AppUI) renderRightRemoteDeskPane(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c.Key("right-pane-scroll")).Fill().Padding(20).Gap(18).Children(func() {
-		// 1. AnyDesk "Remote Desk" Connect Card (Me-remote)
-		ui.Column(c).Padding(18).Gap(12).Radius(10).
-			Background(t.Surface).Border(1, t.Border).
-			Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Children(func() {
-					ui.Column(c).Grow(1).Gap(2).Children(func() {
-						ui.Text(c, "Remote Desk").FontSize(18).Bold()
-						ui.Text(c, "Enter a 9-digit GonDesk Address or Single-Port HTTPS URL to remote control another desk").FontSize(12).TextColor(t.TextMuted)
-					})
-					ui.Badge(c, "HTTPS + TURN 1-Port").Background(t.Accent.Alpha(0.14)).TextColor(t.Accent)
-				})
-
-				ui.Row(c).Gap(10).Children(func() {
-					targetIn := ui.TextInput(c.Key("remote-target-id"), &a.RemoteTargetInput).
-						Placeholder("Enter Remote Desk ID (e.g. 482 910 374) or https://host:8443").Grow(2)
-					ui.TextInput(c.Key("remote-target-pwd"), &a.RemotePasswordInput).
-						Password().Placeholder("Password (optional)").Width(180)
-
-					connectClicked := ui.PrimaryButton(c, "Connect").Padding(8, 20).Clicked()
-					if connectClicked || targetIn.Submitted() {
-						a.startOutgoingConnection(c, a.RemoteTargetInput, a.RemotePasswordInput)
-					}
-				})
-			})
-
-		// 2. Filter & Search Bar for Address Book / Recent Sessions (GORM SQLite)
+		// 1. Filter & Search Bar for Address Book / Recent Sessions (GORM SQLite)
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "Discovered & Saved Desks").FontSize(15).Bold()
 			ui.Tabs(c, &a.FilterTab, "All Desks", "Favorites ★", "Online")
@@ -394,7 +332,7 @@ func (a *AppUI) renderRightRemoteDeskPane(c *ui.Context, t *ui.Theme) {
 			}
 		})
 
-		// 3. Peer Cards List (from SQLite)
+		// 2. Peer Cards List (from SQLite)
 		filteredPeers := a.filteredPeers()
 		if len(filteredPeers) == 0 {
 			ui.Box(c).Padding(24).Radius(10).Background(t.Surface).Border(1, t.Border).Center().Children(func() {
@@ -449,32 +387,6 @@ func (a *AppUI) renderRightRemoteDeskPane(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		}
-
-		// 4. Recent Session History Table/List from SQLite
-		ui.Column(c).Padding(16).Gap(10).Radius(10).
-			Background(t.Surface).Border(1, t.Border).
-			Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "Recent Session History (GORM SQLite)").FontSize(14).Bold().Grow(1)
-					ui.Badge(c, fmt.Sprintf("%d records", len(a.SessionLogs)))
-				})
-				if len(a.SessionLogs) == 0 {
-					ui.Text(c, "No remote sessions recorded yet. Click 'Connect' on any desk above to start a session.").
-						FontSize(12).TextColor(t.TextMuted)
-				} else {
-					for _, logItem := range a.SessionLogs {
-						l := logItem
-						ui.Row(c.Key("sess-log-"+l.SessionUUID)).Padding(8, 10).Gap(10).Radius(6).
-							Background(t.Background).AlignItems(ui.Center).
-							Children(func() {
-								ui.Badge(c, strings.ToUpper(l.Status))
-								ui.Textf(c, "%s  →  %s", l.ClientDeskID, l.HostDeskID).Bold().FontSize(13)
-								ui.Text(c, l.TransportMode).FontSize(12).TextColor(t.TextMuted).Grow(1)
-								ui.Text(c, l.StartedAt.Format("15:04:05")).FontSize(12).TextColor(t.TextMuted)
-							})
-					}
-				}
-			})
 	})
 }
 
@@ -555,7 +467,7 @@ func (a *AppUI) renderActiveSessionView(c *ui.Context, t *ui.Theme, sess remote.
 					ui.Text(c, "Session Chat & Telemetry").FontSize(14).Bold()
 					ui.Divider(c)
 
-					ui.Scroll(c.Key("chat-scroll-"+sess.SessionUUID)).Grow(1).Gap(6).Children(func() {
+					ui.Scroll(c.Key("chat-scroll-" + sess.SessionUUID)).Grow(1).Gap(6).Children(func() {
 						for i, line := range sess.ChatLog {
 							ui.Text(c.Key(fmt.Sprintf("chat-line-%d", i)), line).FontSize(12)
 						}
@@ -748,10 +660,11 @@ func (a *AppUI) metricCard(c *ui.Context, t *ui.Theme, title, value, subtitle st
 }
 
 func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
-	ui.Modal(c, &a.AddPeerModalOpen, func() {
+	if ui.Modal(c, &a.AddPeerModalOpen, func() {
 		ui.Column(c).Width(380).Gap(12).Children(func() {
-			ui.Text(c, "Add Desk to Address Book (SQLite)").FontSize(16).Bold()
-			ui.TextInput(c.Key("modal-peer-id"), &a.NewPeerID).Placeholder("GonDesk ID (e.g. 612 840 193)").AutoFocus()
+			ui.Text(c, "Add Desk to Address Book").FontSize(16).Bold()
+			ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).Placeholder("Endpoint URL (e.g. https://host:8443)").AutoFocus()
+			ui.TextInput(c.Key("modal-peer-id"), &a.NewPeerID).Placeholder("GonDesk ID (e.g. 612 840 193)")
 			ui.TextInput(c.Key("modal-peer-alias"), &a.NewPeerAlias).Placeholder("Alias (e.g. Home-Desktop)")
 
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
@@ -759,8 +672,25 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 					a.AddPeerModalOpen = false
 				}
 				if ui.PrimaryButton(c, "Save Desk").Clicked() {
-					if strings.TrimSpace(a.NewPeerID) != "" {
-						_, _ = a.Store.UpsertPeer(a.NewPeerID, a.NewPeerAlias, "", "remote", a.Cfg.BridgeServerURL, true)
+					rawURL := strings.TrimSpace(a.NewPeerURL)
+					peerID := strings.TrimSpace(a.NewPeerID)
+					alias := strings.TrimSpace(a.NewPeerAlias)
+
+					if peerID == "" && rawURL != "" {
+						peerID = database.GenerateDeskID()
+					}
+					if alias == "" && rawURL != "" {
+						if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
+							alias = parsed.Host
+						}
+					}
+					if rawURL == "" {
+						rawURL = a.Cfg.BridgeServerURL
+					}
+
+					if peerID != "" {
+						_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
+						a.NewPeerURL = ""
 						a.NewPeerID = ""
 						a.NewPeerAlias = ""
 						a.AddPeerModalOpen = false
@@ -770,7 +700,68 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				}
 			})
 		})
-	})
+	}).Dismissed() {
+		// Prevent clicking outside the dialog/backdrop from closing the modal.
+		// The modal must only be closed explicitly via dialog buttons (e.g., Cancel or Save).
+		a.AddPeerModalOpen = true
+	}
+}
+
+// ConnectAndAddURLPeer validates the required http:// or https:// URL, connects to it,
+// and adds the desk/endpoint into the Discovered & Saved Desks list in SQLite.
+func (a *AppUI) ConnectAndAddURLPeer(c *ui.Context) {
+	rawURL := strings.TrimSpace(a.QuickConnectURL)
+	lowerURL := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {
+		c.Toast("URL wajib menggunakan http:// atau https://")
+		return
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		c.Toast("Format URL tidak valid (contoh: https://host:8443)")
+		return
+	}
+
+	name := strings.TrimSpace(a.QuickConnectName)
+	if name == "" {
+		name = parsed.Host
+	}
+
+	deskID := ""
+	for _, p := range a.Peers {
+		if strings.EqualFold(p.EndpointURL, rawURL) && strings.EqualFold(p.Alias, name) {
+			deskID = p.DeskID
+			break
+		}
+	}
+	if deskID == "" {
+		deskID = database.GenerateDeskID()
+	}
+
+	if a.Store != nil {
+		_, _ = a.Store.UpsertPeer(deskID, name, parsed.Hostname(), runtime.GOOS+"/"+runtime.GOARCH, rawURL, true)
+		a.Store.IncrementPeerConnection(deskID, rawURL)
+
+		if st, err := a.Store.GetSettings(); err == nil {
+			st.BridgeServerURL = rawURL
+			_ = a.Store.SaveSettings(&st)
+		}
+	}
+
+	if a.Cfg != nil {
+		a.Cfg.BridgeServerURL = rawURL
+	}
+	if a.Manager != nil {
+		go a.Manager.ReconnectBridge()
+	}
+
+	a.QuickConnectName = ""
+	a.QuickConnectURL = ""
+	a.FilterTab = 0
+	a.SearchQuery = ""
+	a.ReloadFromDB()
+	c.Toast(fmt.Sprintf("Connected to %s (%s) & added to list", name, rawURL))
 }
 
 func (a *AppUI) startOutgoingConnection(c *ui.Context, target, password string) {

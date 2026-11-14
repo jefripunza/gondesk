@@ -36,10 +36,40 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	mgr := remote.NewManager(cfg, store, nil, nil)
 	appUI := uiapp.NewAppUI(cfg, store, nil, mgr)
 
-	// 1. Verify Desktop Mode renders AnyDesk-style "This Desk" (Di-remote) & "Remote Desk" (Me-remote)
+	// 1. Verify Desktop Mode renders "Your Address" and "Discovered & Saved Desks"
 	tt := ui.NewTester(appUI.View, 1120, 720)
-	if !tt.HasText("This Desk") || !tt.HasText("Remote Desk") || !tt.HasText(appUI.DeskID) {
-		t.Fatalf("expected Desktop Mode UI to show 'This Desk', 'Remote Desk', and DeskID %q; got texts: %v", appUI.DeskID, tt.Texts())
+	if !tt.HasText("Your Address") || !tt.HasText("Discovered & Saved Desks") || !tt.HasText(appUI.DeskID) {
+		t.Fatalf("expected Desktop Mode UI to show 'Your Address', 'Discovered & Saved Desks', and DeskID %q; got texts: %v", appUI.DeskID, tt.Texts())
+	}
+
+	// Verify connecting via Name (optional) + URL (http/https required) adds to Discovered & Saved Desks list
+	appUI.QuickConnectName = "Kantor-Cabang-Server"
+	appUI.QuickConnectURL = "https://10.20.30.40:8443"
+	ttConnect := ui.NewTester(func(c *ui.Context) {
+		appUI.ConnectAndAddURLPeer(c)
+		appUI.View(c)
+	}, 1120, 720)
+	if !ttConnect.HasText("Kantor-Cabang-Server") {
+		t.Fatalf("expected connected URL peer 'Kantor-Cabang-Server' to appear in Discovered & Saved Desks list; got texts: %v", ttConnect.Texts())
+	}
+
+	// Verify modal dialog does not close when clicking outside (backdrop)
+	appUI.AddPeerModalOpen = true
+	ttModal := ui.NewTester(appUI.View, 1120, 720)
+	if !ttModal.HasText("Add Desk to Address Book") {
+		t.Fatalf("expected modal to be open; got texts: %v", ttModal.Texts())
+	}
+	// Click outside the modal dialog (at top-left backdrop coordinate)
+	ttModal.ClickAt(10, 10)
+	ttModal.Frame()
+	if !appUI.AddPeerModalOpen {
+		t.Fatalf("modal should NOT close when clicking outside; expected AddPeerModalOpen=true")
+	}
+	// Verify Cancel button explicitly closes the modal
+	ttModal.Click("Cancel")
+	ttModal.Frame()
+	if appUI.AddPeerModalOpen {
+		t.Fatalf("modal should close when clicking Cancel button; expected AddPeerModalOpen=false")
 	}
 
 	// 2. Switch to Server Mode and verify Desktop features are hidden

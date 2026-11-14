@@ -17,6 +17,7 @@
 
 [Features](#-key-features) •
 [Architecture](#-single-port-architecture) •
+[Knowledge Base](KNOWLEDGE.md) •
 [Quick Start](#-quick-start) •
 [Docker Deployment](#-docker--server-deployment) •
 [CLI & Env Reference](#️-configuration--flags) •
