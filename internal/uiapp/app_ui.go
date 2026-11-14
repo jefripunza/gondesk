@@ -47,17 +47,19 @@ type AppUI struct {
 	RemotePasswordInput string
 	SearchQuery         string
 
-	// Add Peer Modal state
-	AddPeerModalOpen bool
-	NewPeerURL       string
-	NewPeerURLError  string
-	NewPeerID        string
-	NewPeerIDPart1   string
-	NewPeerIDPart2   string
-	NewPeerIDPart3   string
-	PeerIDReqFocus   int
-	PeerIDFocused    bool
-	NewPeerAlias     string
+	// Add/Edit Peer Modal state
+	AddPeerModalOpen      bool
+	IsEditingPeer         bool
+	EditingOriginalDeskID string
+	NewPeerURL            string
+	NewPeerURLError       string
+	NewPeerID             string
+	NewPeerIDPart1        string
+	NewPeerIDPart2        string
+	NewPeerIDPart3        string
+	PeerIDReqFocus        int
+	PeerIDFocused         bool
+	NewPeerAlias          string
 
 	// Delete confirmation modal state
 	DeleteConfirmModalOpen bool

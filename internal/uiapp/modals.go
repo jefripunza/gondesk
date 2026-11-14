@@ -16,7 +16,13 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 			Background(t.Surface).Border(1, t.Border).
 			Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.7))
 
-		ui.Text(c, "Add Desk to Address Book").FontSize(16).Bold()
+		modalTitle := "Add Desk to Address Book"
+		saveBtnLabel := "Save Desk"
+		if a.IsEditingPeer {
+			modalTitle = "Edit Desk"
+			saveBtnLabel = "Save Changes"
+		}
+		ui.Text(c, modalTitle).FontSize(16).Bold()
 
 		ui.Column(c).Gap(4).Children(func() {
 			urlIn := ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).
@@ -153,6 +159,8 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "Cancel").Clicked() {
 				a.AddPeerModalOpen = false
+				a.IsEditingPeer = false
+				a.EditingOriginalDeskID = ""
 				a.NewPeerURLError = ""
 				a.NewPeerID = ""
 				a.NewPeerIDPart1 = ""
@@ -161,7 +169,7 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				a.PeerIDReqFocus = 0
 				a.PeerIDFocused = false
 			}
-			if ui.PrimaryButton(c, "Save Desk").Clicked() {
+			if ui.PrimaryButton(c, saveBtnLabel).Clicked() {
 				cleaned, errMsg := ValidateHostURL(a.NewPeerURL)
 				a.NewPeerURL = cleaned
 				if errMsg != "" {
@@ -187,7 +195,11 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				}
 
 				if peerID != "" {
+					if a.IsEditingPeer && a.EditingOriginalDeskID != "" && a.EditingOriginalDeskID != peerID {
+						_ = a.Store.DeletePeer(a.EditingOriginalDeskID)
+					}
 					_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
+					isEdit := a.IsEditingPeer
 					a.NewPeerURL = ""
 					a.NewPeerURLError = ""
 					a.NewPeerID = ""
@@ -197,9 +209,15 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 					a.PeerIDReqFocus = 0
 					a.PeerIDFocused = false
 					a.NewPeerAlias = ""
+					a.IsEditingPeer = false
+					a.EditingOriginalDeskID = ""
 					a.AddPeerModalOpen = false
 					a.ReloadFromDB()
-					c.Toast("Saved desk to SQLite Address Book")
+					if isEdit {
+						c.Toast("Updated desk in SQLite Address Book")
+					} else {
+						c.Toast("Saved desk to SQLite Address Book")
+					}
 				}
 			}
 		})

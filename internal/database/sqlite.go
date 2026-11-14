@@ -163,6 +163,16 @@ func (s *Store) ListPeers() ([]PeerRecord, error) {
 	return peers, err
 }
 
+// GetPeer returns a single peer by desk ID.
+func (s *Store) GetPeer(deskID string) (*PeerRecord, error) {
+	deskID = NormalizeDeskID(deskID)
+	var peer PeerRecord
+	if err := s.DB.Where("desk_id = ?", deskID).First(&peer).Error; err != nil {
+		return nil, err
+	}
+	return &peer, nil
+}
+
 // UpsertPeer registers or updates a peer in SQLite.
 func (s *Store) UpsertPeer(deskID, alias, hostname, osName, endpointURL string, online bool) (*PeerRecord, error) {
 	deskID = NormalizeDeskID(deskID)

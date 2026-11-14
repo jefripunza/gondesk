@@ -155,6 +155,44 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected peer '612 840 193' in peers list: %v", peers)
 	}
 
+	// Verify Edit button ("✏️") is present between Favorite ("☆") and Delete ("🗑") on the peer card
+	ttDesks := ui.NewTester(appUI.View, 1120, 720)
+	if !ttDesks.HasText("✏️") {
+		t.Fatalf("expected peer card to have Edit button '✏️'; got texts: %v", ttDesks.Texts())
+	}
+	// Click the edit button
+	ttDesks.Click("✏️")
+	ttDesks.Frame()
+	if !appUI.AddPeerModalOpen || !appUI.IsEditingPeer {
+		t.Fatalf("expected modal to open in edit mode; AddPeerModalOpen=%v, IsEditingPeer=%v",
+			appUI.AddPeerModalOpen, appUI.IsEditingPeer)
+	}
+	if !ttDesks.HasText("Edit Desk") || !ttDesks.HasText("Save Changes") {
+		t.Fatalf("expected modal title 'Edit Desk' and button 'Save Changes'; got texts: %v", ttDesks.Texts())
+	}
+	if appUI.NewPeerIDPart1 != "612" || appUI.NewPeerIDPart2 != "840" || appUI.NewPeerIDPart3 != "193" {
+		t.Fatalf("expected pre-filled ID parts '612', '840', '193'; got %q %q %q",
+			appUI.NewPeerIDPart1, appUI.NewPeerIDPart2, appUI.NewPeerIDPart3)
+	}
+	if appUI.NewPeerAlias != "Linux-Workstation" {
+		t.Fatalf("expected pre-filled alias 'Linux-Workstation', got %q", appUI.NewPeerAlias)
+	}
+	// Modify alias and save
+	appUI.NewPeerAlias = "Linux-Workstation-Renamed"
+	ttDesks.Click("Save Changes")
+	ttDesks.Frame()
+	if appUI.AddPeerModalOpen {
+		t.Fatalf("expected edit modal to close after saving changes")
+	}
+	// Verify update in store
+	updatedPeer, err := store.GetPeer("612 840 193")
+	if err != nil {
+		t.Fatalf("GetPeer error: %v", err)
+	}
+	if updatedPeer.Alias != "Linux-Workstation-Renamed" {
+		t.Fatalf("expected alias 'Linux-Workstation-Renamed', got %q", updatedPeer.Alias)
+	}
+
 	// Reopen modal to verify Cancel and backdrop behavior
 	appUI.AddPeerModalOpen = true
 	appUI.NewPeerID = "123123193"

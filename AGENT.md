@@ -208,6 +208,11 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
    - Halaman utama remote desks kini menggunakan tampilan penuh melalui [desks_view.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/desks_view.go) tanpa `ui.Split`.
 2. **Larangan Menampilkan Nilai Ukuran Sementara**:
    - Teks angka ukuran debugging/sementara (seperti `%.0f px`) dilarang dimunculkan kembali setelah kebutuhan inspeksi selesai.
+3. **Urutan Tombol Aksi pada Kartu Remote Desk**:
+   - Kartu remote desk di [desks_view.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/desks_view.go) memiliki susunan tombol aksi:
+     `[ ☆ / ★ Favorite ] [ ✏️ Edit ] [ 🗑 Delete ] [ Connect ]`
+   - **Tombol Edit (`✏️`)** wajib diletakkan tepat di antara tombol favorit (`☆` / `★`) dan tombol hapus (`🗑`).
+   - Mengklik tombol Edit akan membuka modal dialog dalam mode pengeditan (`Edit Desk` dengan tombol aksi `Save Changes`), mengisi seluruh data desk yang ada (URL, 9-digit ID terbagi dalam 3 segmen, dan Alias), serta menyimpan pembaruan ke SQLite database (`Store.UpsertPeer`), termasuk menghapus ID lama jika pengguna mengubah nomor ID desk.
 
 ---
 

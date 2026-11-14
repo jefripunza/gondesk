@@ -21,6 +21,8 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 			ui.Spacer(c)
 			ui.SearchField(c.Key("peer-search"), &a.SearchQuery).Placeholder("Search ID or alias...").Width(240)
 			if ui.Button(c, "+ Add Desk").Clicked() {
+				a.IsEditingPeer = false
+				a.EditingOriginalDeskID = ""
 				a.NewPeerURLError = ""
 				a.NewPeerID = ""
 				a.NewPeerIDPart1 = ""
@@ -52,11 +54,6 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 								statusColor = t.TextMuted
 								statusLabel = "OFFLINE"
 							}
-							ui.Box(c).Size(46, 46).Radius(8).
-								Background(statusColor.Alpha(0.14)).Center().
-								Children(func() {
-									ui.Text(c, "DESK").FontSize(11).Bold().TextColor(statusColor)
-								})
 
 							ui.Column(c).Grow(1).Gap(4).Children(func() {
 								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -79,6 +76,10 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 								a.ReloadFromDB()
 							})
 
+							if ui.Button(c, "✏️").Tooltip("Edit Desk").Clicked() {
+								a.openEditPeerModal(p)
+							}
+
 							if ui.Button(c, "🗑").Tooltip("Hapus Desk dari Buku Alamat").Clicked() {
 								a.PendingDeletePeerID = p.DeskID
 								a.PendingDeletePeerAlias = p.Alias
@@ -97,6 +98,19 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 			})
 		}
 	})
+}
+
+func (a *AppUI) openEditPeerModal(p database.PeerRecord) {
+	a.IsEditingPeer = true
+	a.EditingOriginalDeskID = p.DeskID
+	a.NewPeerURL = p.EndpointURL
+	a.NewPeerURLError = ""
+	a.NewPeerID = p.DeskID
+	a.NewPeerAlias = p.Alias
+	a.PeerIDReqFocus = 0
+	a.PeerIDFocused = false
+	a.syncPeerID()
+	a.AddPeerModalOpen = true
 }
 
 func (a *AppUI) startOutgoingConnection(c *ui.Context, target, password string) {
