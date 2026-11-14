@@ -145,6 +145,38 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		}
 	}
 
+	// Verify Settings View with Sidebar Menu (General, Network, About)
+	appUI.ActiveTab = 1
+	appUI.SettingsSection = "general"
+	ttSettings := ui.NewTester(appUI.View, 1120, 720)
+	if !ttSettings.HasText("General") || !ttSettings.HasText("Network") || !ttSettings.HasText("About") {
+		t.Fatalf("expected Settings sidebar to have General, Network, About; got texts: %v", ttSettings.Texts())
+	}
+	if !ttSettings.HasText("General Preferences") || !ttSettings.HasText("Device Alias") {
+		t.Fatalf("expected General settings section to be displayed; got texts: %v", ttSettings.Texts())
+	}
+
+	// Switch to Network section
+	appUI.SettingsSection = "network"
+	ttSettings.Frame()
+	if !ttSettings.HasText("GonDesk Network & Single-Port Configuration") || !ttSettings.HasText("Global Bridge Server URL") {
+		t.Fatalf("expected Network settings section to be displayed; got texts: %v", ttSettings.Texts())
+	}
+
+	// Switch to About section
+	appUI.SettingsSection = "about"
+	ttSettings.Frame()
+	if !ttSettings.HasText("About GonDesk") || !ttSettings.HasText("v0.1.0") || !ttSettings.HasText("MIT License") {
+		t.Fatalf("expected About settings section to be displayed; got texts: %v", ttSettings.Texts())
+	}
+
+	// Clicking Back to Home returns to main view
+	ttSettings.Click("Back to Home")
+	ttSettings.Frame()
+	if appUI.ActiveTab != 0 {
+		t.Fatalf("expected clicking 'Back to Home' to reset ActiveTab to 0, got %d", appUI.ActiveTab)
+	}
+
 	// 2. Switch to Server Mode and verify Desktop features are hidden
 	cfg.Mode = config.ModeServer
 	ttServer := ui.NewTester(appUI.View, 1120, 720)

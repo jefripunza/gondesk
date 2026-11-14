@@ -148,7 +148,7 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
      - `right_pane.go`: Panel kanan / content (Buku alamat peer, filter tabs, pencarian, kartu peer).
      - `modals.go`: Dialog modal popup (dialog tambah desk dan dialog konfirmasi hapus).
      - `active_session.go`: Viewport remote desktop canvas GPU dan sidebar chat/telemetri.
-     - `settings.go`: Form konfigurasi settings desktop.
+     - `settings.go`: Pengaturan desktop dengan navigasi sidebar menu (`General`, `Network`, `About`).
      - `server_dashboard.go`: Dashboard metrik & audit logs mode server bridge.
 2. **Kaidah Penambahan Fitur UI Baru**:
    - Setiap kali membuat komponen antarmuka baru dengan konteks berbeda, **wajib dibuatkan file `.go` baru** di package `internal/uiapp/` dengan nama yang deskriptif.

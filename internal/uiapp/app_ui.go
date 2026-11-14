@@ -22,9 +22,10 @@ type AppUI struct {
 	Win     *mygo.Window
 
 	// Navigation & Tab state
-	ActiveTab     int // 0 = Home / Console, 1 = Settings, >=2 = Active Session index (idx - 2)
-	FilterTab     int // 0 = All Desks, 1 = Favorites, 2 = Online Only
-	LeftPaneWidth float32
+	ActiveTab       int    // 0 = Home / Console, 1 = Settings, >=2 = Active Session index (idx - 2)
+	SettingsSection string // "general", "network", "about"
+	FilterTab       int    // 0 = All Desks, 1 = Favorites, 2 = Online Only
+	LeftPaneWidth   float32
 
 	// Local Desk ("This Desk" - Di-remote) state bound to controls
 	DeskID            string
@@ -75,11 +76,12 @@ type AppUI struct {
 // NewAppUI initializes the UI state from SQLite and Configuration.
 func NewAppUI(cfg *config.Config, store *database.Store, node *server.UnifiedNode, mgr *remote.Manager) *AppUI {
 	a := &AppUI{
-		Cfg:           cfg,
-		Store:         store,
-		Node:          node,
-		Manager:       mgr,
-		LeftPaneWidth: 340,
+		Cfg:             cfg,
+		Store:           store,
+		Node:            node,
+		Manager:         mgr,
+		LeftPaneWidth:   340,
+		SettingsSection: "general",
 	}
 	a.ReloadFromDB()
 	return a
