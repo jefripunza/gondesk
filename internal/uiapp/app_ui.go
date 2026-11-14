@@ -54,6 +54,10 @@ type AppUI struct {
 	NewPeerID        string
 	NewPeerAlias     string
 
+	// Focus tracking for onblur URL normalization
+	quickConnectURLFocused bool
+	modalPeerURLFocused    bool
+
 	// Active session chat draft
 	ChatDraft string
 
@@ -310,6 +314,10 @@ func (a *AppUI) renderLeftThisDeskPane(c *ui.Context, t *ui.Theme) {
 
 				urlIn := ui.TextInput(c.Key("quick-connect-url"), &a.QuickConnectURL).
 					Placeholder("https://host:8443 (http / https required)")
+				if urlIn.FocusLeft() || (a.quickConnectURLFocused && !urlIn.Focused()) {
+					a.QuickConnectURL = CleanURL(a.QuickConnectURL)
+				}
+				a.quickConnectURLFocused = urlIn.Focused()
 
 				connectClicked := ui.PrimaryButton(c, "Connect").FillWidth().Clicked()
 				if connectClicked || nameIn.Submitted() || urlIn.Submitted() {
@@ -323,7 +331,6 @@ func (a *AppUI) renderRightRemoteDeskPane(c *ui.Context, t *ui.Theme) {
 	ui.Scroll(c.Key("right-pane-scroll")).Fill().Padding(20).Gap(18).Children(func() {
 		// 1. Filter & Search Bar for Address Book / Recent Sessions (GORM SQLite)
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "Discovered & Saved Desks").FontSize(15).Bold()
 			ui.Tabs(c, &a.FilterTab, "All Desks", "Favorites ★", "Online")
 			ui.Spacer(c)
 			ui.SearchField(c.Key("peer-search"), &a.SearchQuery).Placeholder("Search ID or alias...").Width(200)
@@ -660,56 +667,89 @@ func (a *AppUI) metricCard(c *ui.Context, t *ui.Theme, title, value, subtitle st
 }
 
 func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
-	if ui.Modal(c, &a.AddPeerModalOpen, func() {
-		ui.Column(c).Width(380).Gap(12).Children(func() {
-			ui.Text(c, "Add Desk to Address Book").FontSize(16).Bold()
-			ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).Placeholder("Endpoint URL (e.g. https://host:8443)").AutoFocus()
-			ui.TextInput(c.Key("modal-peer-id"), &a.NewPeerID).Placeholder("GonDesk ID (e.g. 612 840 193)")
-			ui.TextInput(c.Key("modal-peer-alias"), &a.NewPeerAlias).Placeholder("Alias (e.g. Home-Desktop)")
+	if ui.DialogBase(c, &a.AddPeerModalOpen, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.85))
+		panel.Width(390).Padding(20).Gap(14).Radius(12).
+			Background(t.Surface).Border(1, t.Border).
+			Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.7))
 
-			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if ui.Button(c, "Cancel").Clicked() {
+		ui.Text(c, "Add Desk to Address Book").FontSize(16).Bold()
+
+		urlIn := ui.TextInput(c.Key("modal-peer-url"), &a.NewPeerURL).
+			Placeholder("Endpoint URL (e.g. https://host:8443)").AutoFocus()
+		if urlIn.FocusLeft() || (a.modalPeerURLFocused && !urlIn.Focused()) {
+			a.NewPeerURL = CleanURL(a.NewPeerURL)
+		}
+		a.modalPeerURLFocused = urlIn.Focused()
+
+		ui.TextInput(c.Key("modal-peer-id"), &a.NewPeerID).Placeholder("GonDesk ID (e.g. 612 840 193)")
+		ui.TextInput(c.Key("modal-peer-alias"), &a.NewPeerAlias).Placeholder("Alias (e.g. Home-Desktop)")
+
+		ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+			if ui.Button(c, "Cancel").Clicked() {
+				a.AddPeerModalOpen = false
+			}
+			if ui.PrimaryButton(c, "Save Desk").Clicked() {
+				rawURL := CleanURL(a.NewPeerURL)
+				peerID := strings.TrimSpace(a.NewPeerID)
+				alias := strings.TrimSpace(a.NewPeerAlias)
+
+				if peerID == "" && rawURL != "" {
+					peerID = database.GenerateDeskID()
+				}
+				if alias == "" && rawURL != "" {
+					if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
+						alias = parsed.Host
+					}
+				}
+				if rawURL == "" {
+					rawURL = a.Cfg.BridgeServerURL
+				}
+
+				if peerID != "" {
+					_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
+					a.NewPeerURL = ""
+					a.NewPeerID = ""
+					a.NewPeerAlias = ""
 					a.AddPeerModalOpen = false
+					a.ReloadFromDB()
+					c.Toast("Saved desk to SQLite Address Book")
 				}
-				if ui.PrimaryButton(c, "Save Desk").Clicked() {
-					rawURL := strings.TrimSpace(a.NewPeerURL)
-					peerID := strings.TrimSpace(a.NewPeerID)
-					alias := strings.TrimSpace(a.NewPeerAlias)
-
-					if peerID == "" && rawURL != "" {
-						peerID = database.GenerateDeskID()
-					}
-					if alias == "" && rawURL != "" {
-						if parsed, err := url.Parse(rawURL); err == nil && parsed.Host != "" {
-							alias = parsed.Host
-						}
-					}
-					if rawURL == "" {
-						rawURL = a.Cfg.BridgeServerURL
-					}
-
-					if peerID != "" {
-						_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
-						a.NewPeerURL = ""
-						a.NewPeerID = ""
-						a.NewPeerAlias = ""
-						a.AddPeerModalOpen = false
-						a.ReloadFromDB()
-						c.Toast("Saved desk to SQLite Address Book")
-					}
-				}
-			})
+			}
 		})
 	}).Dismissed() {
-		// Prevent clicking outside the dialog/backdrop from closing the modal.
-		// The modal must only be closed explicitly via dialog buttons (e.g., Cancel or Save).
+		// PERTAHANKAN MODAL TETAP TERBUKA JIKA DIKLIK DI LUAR
+		// Clicks pada backdrop luar mengaktifkan Dismissed(), kita setel kembali ke true
+		// sesuai aturan baku AGENT.md sehingga dialog TIDAK AKAN tertutup kecuali tombol Cancel/Save di dalam diklik.
 		a.AddPeerModalOpen = true
 	}
+}
+
+// CleanURL normalizes a URL or host string:
+// 1. Strips any trailing slashes ("/")
+// 2. Prepends "http://" if neither "http://" nor "https://" scheme is present
+func CleanURL(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	for strings.HasSuffix(s, "/") && s != "http://" && s != "https://" {
+		s = strings.TrimSuffix(s, "/")
+	}
+	lower := strings.ToLower(s)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		s = "http://" + s
+	}
+	for strings.HasSuffix(s, "/") && s != "http://" && s != "https://" {
+		s = strings.TrimSuffix(s, "/")
+	}
+	return s
 }
 
 // ConnectAndAddURLPeer validates the required http:// or https:// URL, connects to it,
 // and adds the desk/endpoint into the Discovered & Saved Desks list in SQLite.
 func (a *AppUI) ConnectAndAddURLPeer(c *ui.Context) {
+	a.QuickConnectURL = CleanURL(a.QuickConnectURL)
 	rawURL := strings.TrimSpace(a.QuickConnectURL)
 	lowerURL := strings.ToLower(rawURL)
 	if !strings.HasPrefix(lowerURL, "http://") && !strings.HasPrefix(lowerURL, "https://") {

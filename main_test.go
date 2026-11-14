@@ -36,10 +36,13 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	mgr := remote.NewManager(cfg, store, nil, nil)
 	appUI := uiapp.NewAppUI(cfg, store, nil, mgr)
 
-	// 1. Verify Desktop Mode renders "Your Address" and "Discovered & Saved Desks"
+	// 1. Verify Desktop Mode renders "Your Address" and "All Desks" (and NOT "Discovered & Saved Desks")
 	tt := ui.NewTester(appUI.View, 1120, 720)
-	if !tt.HasText("Your Address") || !tt.HasText("Discovered & Saved Desks") || !tt.HasText(appUI.DeskID) {
-		t.Fatalf("expected Desktop Mode UI to show 'Your Address', 'Discovered & Saved Desks', and DeskID %q; got texts: %v", appUI.DeskID, tt.Texts())
+	if !tt.HasText("Your Address") || !tt.HasText("All Desks") || !tt.HasText(appUI.DeskID) {
+		t.Fatalf("expected Desktop Mode UI to show 'Your Address', 'All Desks', and DeskID %q; got texts: %v", appUI.DeskID, tt.Texts())
+	}
+	if tt.HasText("Discovered & Saved Desks") {
+		t.Fatalf("expected 'Discovered & Saved Desks' header to be completely removed from UI; got texts: %v", tt.Texts())
 	}
 
 	// Verify connecting via Name (optional) + URL (http/https required) adds to Discovered & Saved Desks list
@@ -166,6 +169,31 @@ func TestSinglePortHTTPSAndTURNAndWebSocket(t *testing.T) {
 	logs, err := store.ListSessionLogs(10)
 	if err != nil || len(logs) == 0 {
 		t.Fatalf("expected session log persisted in SQLite, got %d (err=%v)", len(logs), err)
+	}
+}
+
+func TestCleanURL(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"192.168.1.1:8443", "http://192.168.1.1:8443"},
+		{"192.168.1.1:8443/", "http://192.168.1.1:8443"},
+		{"192.168.1.1:8443///", "http://192.168.1.1:8443"},
+		{"http://192.168.1.1:8443", "http://192.168.1.1:8443"},
+		{"http://192.168.1.1:8443/", "http://192.168.1.1:8443"},
+		{"https://192.168.1.1:8443", "https://192.168.1.1:8443"},
+		{"https://192.168.1.1:8443/", "https://192.168.1.1:8443"},
+		{"https://192.168.1.1:8443///", "https://192.168.1.1:8443"},
+		{"  10.0.0.5:8080/path/  ", "http://10.0.0.5:8080/path"},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		got := uiapp.CleanURL(tc.input)
+		if got != tc.expected {
+			t.Errorf("CleanURL(%q) = %q; expected %q", tc.input, got, tc.expected)
+		}
 	}
 }
 

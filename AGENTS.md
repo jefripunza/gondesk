@@ -13,30 +13,40 @@ Dokumen ini berisi aturan baku (**Engineering Rules & Guidelines**) yang **WAJIB
 ### 🛠️ Mengapa Aturan Ini Berlaku?
 Secara default pada MyGo (`github.com/egoist/mygo/ui`), fungsi `ui.Modal(c, &open, fn)` akan mengubah `*open = false` apabila pengguna mengklik backdrop atau menekan Escape. Hal ini berbahaya karena pengguna yang sedang mengetik data (misal: ID desk, nama, password) dapat kehilangan input secara tidak sengaja jika kursor mouse terpeleset ke luar batas dialog.
 
-### 💻 Pola Implementasi Baku (Standard Pattern)
-Gunakan method `.Dismissed()` dari `ui.Modal` untuk mengembalikan status `*open = true` apabila terjadi penutupan di luar tombol dialog:
+### 💻 Pola Implementasi Baku (Standard Pattern: Dark Backdrop via `ui.DialogBase`)
+Gunakan `ui.DialogBase` dengan styling `backdrop.Background(ui.RGBA(0, 0, 0, 0.85))` agar efek overlay gelap pekat (menggantikan default `ui.Modal` yang terlalu terang/transparan), serta method `.Dismissed()` untuk mengembalikan status `*open = true` apabila terjadi penutupan di luar tombol dialog:
 
 ```go
 func (a *AppUI) renderMyModal(c *ui.Context, t *ui.Theme) {
-    if ui.Modal(c, &a.MyModalOpen, func() {
-        ui.Column(c).Width(380).Gap(12).Children(func() {
-            ui.Text(c, "Judul Dialog").FontSize(16).Bold()
+    if ui.DialogBase(c, &a.MyModalOpen, func(backdrop, panel ui.Element) {
+        // 1. Overlay backdrop gelap pekat (opacity ~85%)
+        backdrop.Background(ui.RGBA(0, 0, 0, 0.85))
 
-            // Form inputs ...
-            ui.TextInput(c.Key("input-field"), &a.Field)
+        // 2. Styling panel popup
+        panel.Width(390).Padding(20).Gap(14).Radius(12).
+            Background(t.Surface).Border(1, t.Border).
+            Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.7))
 
-            ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-                // 1. Tombol Cancel: Menutup modal secara eksplisit
-                if ui.Button(c, "Cancel").Clicked() {
-                    a.MyModalOpen = false
-                }
+        ui.Text(c, "Judul Dialog").FontSize(16).Bold()
 
-                // 2. Tombol Submit / Save: Menyimpan data & menutup modal
-                if ui.PrimaryButton(c, "Save").Clicked() {
-                    a.saveData()
-                    a.MyModalOpen = false
-                }
-            })
+        // Form inputs & onblur validation...
+        urlIn := ui.TextInput(c.Key("input-field"), &a.Field)
+        if urlIn.FocusLeft() || (a.fieldFocused && !urlIn.Focused()) {
+            a.Field = CleanURL(a.Field)
+        }
+        a.fieldFocused = urlIn.Focused()
+
+        ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+            // Tombol Cancel: Menutup modal secara eksplisit
+            if ui.Button(c, "Cancel").Clicked() {
+                a.MyModalOpen = false
+            }
+
+            // Tombol Submit / Save: Menyimpan data & menutup modal
+            if ui.PrimaryButton(c, "Save").Clicked() {
+                a.saveData()
+                a.MyModalOpen = false
+            }
         })
     }).Dismissed() {
         // PERTAHANKAN MODAL TETAP TERBUKA JIKA DIKLIK DI LUAR
@@ -46,6 +56,26 @@ func (a *AppUI) renderMyModal(c *ui.Context, t *ui.Theme) {
     }
 }
 ```
+
+---
+
+## 🔗 2. Aturan Validasi & Normalisasi URL Input (`onblur`)
+
+Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan desk) **WAJIB** menerapkan aturan normalisasi berikut:
+
+1. **Auto-Prepend `http://`**:
+   - Jika pengguna hanya mengisi alamat host atau IP beserta port (misalnya: `"192.168.1.1:8443"`), sistem wajib secara otomatis mengubahnya menjadi `"http://192.168.1.1:8443"`.
+   - Jika pengguna sudah menuliskan skema protocol (`http://` atau `https://`), protokol tersebut tidak boleh diubah.
+2. **Pangkas Trailing Slash (`/`)**:
+   - Jika terdapat slash penutup di akhir URL (misalnya `"http://192.168.1.1:8443/"` atau `"192.168.1.1:8443/"`), karakter slash penutup wajib otomatis dihapus sehingga menjadi `"http://192.168.1.1:8443"`.
+3. **Eksekusi Normalisasi pada Event `onblur` & Submit**:
+   - Normalisasi harus terjadi saat kursor berpindah keluar dari kolom input (`FocusLeft()` / `!Focused()`), serta saat tombol aksi submit / `Connect` diklik.
+   - Gunakan fungsi utilitas baku `CleanURL(raw string) string`.
+
+---
+
+## 🚫 3. Larangan Menampilkan Kembali Elemen yang Dihapus Pengguna
+- Jika pengguna telah meminta menghapus suatu elemen antarmuka (misalnya judul teks `"Discovered & Saved Desks"` di atas daftar tab), agen **DILARANG KERAS** memunculkan atau menuliskan kembali elemen tersebut di siklus modifikasi selanjutnya.
 
 ---
 
@@ -95,3 +125,4 @@ go test -v ./...
 # 3. Kompilasi bersih semua paket
 go build -v ./...
 ```
+

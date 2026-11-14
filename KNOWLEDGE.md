@@ -286,7 +286,7 @@ stateDiagram-v2
 | **Database GORM SQLite (`gondesk.db`)** | ✅ Aktif | ✅ Aktif |
 | **Panel "Your Address" (9-Digit ID & Di-remote)** | ✅ Ditampilkan | ❌ Disembunyikan (`Hidden`) |
 | **Form Quick Connect (`Name` + `http/https URL`)** | ✅ Ditampilkan | ❌ Disembunyikan (`Hidden`) |
-| **Daftar "Discovered & Saved Desks"** | ✅ Ditampilkan | ❌ Disembunyikan (`Hidden`) |
+| **Daftar Buku Alamat Desks (All Desks / Favorites / Online)** | ✅ Ditampilkan | ❌ Disembunyikan (`Hidden`) |
 | **Incoming Session Approval Banner & Active Viewport** | ✅ Ditampilkan | ❌ Disembunyikan & Ditolak di Manager |
 | **Global Bridge & TURN Server Admin Dashboard** | 🔄 Dapat diakses via Switch Mode | ✅ Tampilan Utama Default |
 
@@ -317,7 +317,7 @@ sequenceDiagram
         UI->>Store: IncrementPeerConnection(deskID, url)
         UI->>Store: SaveSettings(BridgeServerURL = url)
         UI->>UI: ReloadFromDB() & Reset Filter ke "All Desks"
-        UI-->>User: Peer langsung tampil di daftar "Discovered & Saved Desks" (Panel Kanan)
+        UI-->>User: Peer langsung tampil di daftar tab "All Desks" (Panel Kanan)
         UI->>Mgr: go ReconnectBridge()
         Mgr->>Bridge: POST /api/v1/peers/heartbeat (HTTPS)
         Mgr->>Bridge: ProbeSTUNOverTLS (STUN Binding Request via TLS :8443)
@@ -449,7 +449,7 @@ flowchart TD
 
     TabBranch -->|"Tab == 0 (Home)"| MainSplit["renderDesktopMainSplit (ui.Split)"]
     MainSplit --> LeftPane["renderLeftThisDeskPane (Panel Kiri)\n1. Card 'Your Address' (9-Digit ID + Copy Address)\n2. Card Quick Connect:\n   • Input Name (optional)\n   • Input URL (http / https wajib)\n   • Button Connect -> Masuk ke List Kanan"]
-    MainSplit --> RightPane["renderRightRemoteDeskPane (Panel Kanan)\n1. Bar 'Discovered & Saved Desks' (Tabs: All / Favorites / Online + Search + Add Desk)\n2. Daftar Kartu Peer (Badge ONLINE/OFFLINE, Star Favorite, Button Connect)"]
+    MainSplit --> RightPane["renderRightRemoteDeskPane (Panel Kanan)\n1. Filter Tabs (All Desks / Favorites / Online + Search + Add Desk)\n2. Daftar Kartu Peer (Badge ONLINE/OFFLINE, Star Favorite, Button Connect)"]
 
     TabBranch -->|"Tab == 1 (Settings)"| SettingsView["renderDesktopSettings\n• Device Alias\n• Global Bridge Server URL\n• Save & Reconnect Bridge"]
 
@@ -457,9 +457,11 @@ flowchart TD
 ```
 
 ### Aturan Penting MyGo Native UI yang Diterapkan
-1. **Aturan Popup / Modal (Tidak Boleh Tertutup Saat Klik di Luar)**:
-   - Sesuai aturan di [AGENT.md](AGENT.md), semua dialog popup/modal wajib memanfaatkan `.Dismissed()` dari `ui.Modal` untuk mengembalikan status `*open = true` jika pengguna mengklik backdrop luar atau menekan Escape secara tidak sengaja. Dialog **hanya boleh ditutup** melalui tombol eksplisit di dalam dialog (seperti tombol Cancel atau Save).
-2. **Zero `ui.Element` / `*ui.Context` Persistence**:
+1. **Aturan Popup / Modal (Dark Backdrop & Anti-Dismiss Luar)**:
+   - Sesuai aturan di [AGENT.md](AGENT.md), semua modal/dialog menggunakan `ui.DialogBase` dengan overlay gelap pekat `backdrop.Background(ui.RGBA(0, 0, 0, 0.85))` dan wajib memanfaatkan `.Dismissed()` untuk mengembalikan status `*open = true` jika pengguna mengklik backdrop luar atau menekan Escape secara tidak sengaja. Dialog **hanya boleh ditutup** melalui tombol eksplisit di dalam dialog (seperti tombol Cancel atau Save).
+2. **Validasi & Normalisasi URL Input (`onblur`)**:
+   - Kolom URL secara otomatis memangkas *trailing slash* (`/`) dan menambahkan prefix `http://` jika pengguna belum menuliskan skema protocol (misal: `"192.168.1.1:8443"` -> `"http://192.168.1.1:8443"`). Protokol `http://` atau `https://` yang sudah ada tetap dipertahankan.
+3. **Zero `ui.Element` / `*ui.Context` Persistence**:
    - Struct `AppUI` hanya menyimpan *state* data murni (`string`, `bool`, `int`, `float32`, slice model SQLite, dan `*mygo.Window`). Tidak ada `ui.Element` atau `*ui.Context` yang disimpan di dalam struct (diverifikasi dengan `go tool mygo vet .`).
 3. **Stable Keys di Dalam Loop (`c.Key(...)`)**:
    - Setiap elemen yang di-render di dalam perulangan (`sessions`, `filteredPeers`, `SessionLogs`, `TurnCreds`, `ChatLog`) selalu diberi kunci unik menggunakan `c.Key(...)` agar state fokus dan klik tetap stabil antar-frame.
@@ -538,7 +540,9 @@ Proyek ini dilengkapi pengujian tanpa jendela (*headless UI test* menggunakan `u
 
 1. **`TestDesktopAndServerModeViews`**:
    - Memastikan Mode `desktop` menampilkan **Your Address**, **Remote Desk**, dan Desk ID 9-digit.
-   - Memastikan pengisian form **Quick Connect** (`Name` opsional + `URL` `https://...` + klik `Connect`) menambahkan peer baru langsung ke daftar **Discovered & Saved Desks**.
+   - Memastikan pengisian form **Quick Connect** (`Name` opsional + `URL` `https://...` + klik `Connect`) menambahkan peer baru langsung ke daftar buku alamat tab **All Desks**.
+   - Memastikan validasi `CleanURL` menormalisasi URL input secara otomatis (auto-prepend `http://` dan strip trailing `/`).
+   - Memastikan popup modal tidak tertutup saat klik backdrop luar.
    - Memastikan saat beralih ke Mode `server`, fitur-fitur desktop disembunyikan dan tampilan beralih ke **GonDesk Global Bridge & TURN Server Mode**.
 2. **`TestSinglePortHTTPSAndTURNAndWebSocket`**:
    - Memastikan pada **1 port acak yang sama**, request **HTTPS `GET /api/v1/info`**, **STUN Binding over TLS (`ProbeSTUNOverTLS`)**, dan **WebSocket Signaling + pencatatan SQLite** berjalan sukses secara bersamaan.
