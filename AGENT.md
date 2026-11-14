@@ -246,7 +246,20 @@ Setiap kolom input GonDesk ID (terutama pada modal dialog penambahan desk) **WAJ
 
 ---
 
-## 🧪 13. Prosedur Verifikasi Sebelum Commit
+## 🔒 14. Preservasi URL Remote Desk & Integritas Buku Alamat (SQLite)
+
+1. **Dilarang Menimpa URL Kustom pada `IncrementPeerConnection`**:
+   - Fungsi `IncrementPeerConnection(deskID, endpointURL string)` hanya bertugas menaikkan `ConnectionCount`, memperbarui `LastSeenAt`, dan menandai `Online = true`.
+   - **DILARANG KERAS** menimpa kolom `EndpointURL` pada `PeerRecord` yang sudah tersimpan jika peer sudah memiliki URL kustom. `EndpointURL` hanya boleh diisi apabila sebelumnya masih kosong (`peer.EndpointURL == ""`).
+2. **Koneksi WebSocket `/ws/signal` Tidak Boleh Memakai `LocalHTTPSURL()`**:
+   - Handler WebSocket `/ws/signal` di [fiber_server.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/server/fiber_server.go) dilarang menyetel `endpointURL` peer menggunakan alamat lokal server sendiri (`n.Cfg.LocalHTTPSURL()`, e.g. `https://127.0.0.1:8443`), melainkan hanya meneruskan parameter query dari peer yang bersangkutan (`c.Query("endpoint_url")`).
+3. **Penyimpanan Modal `Edit Desk`**:
+   - Modal edit desk menggunakan `Store.UpdatePeerDetails(deskID, alias, endpointURL)` agar data URL dan alias yang dimasukkan pengguna tersimpan persisten ke SQLite tanpa kehilangan data metadata lainnya.
+   - Kolom URL kustom tidak boleh dipaksa diubah menjadi default `BridgeServerURL` (`https://127.0.0.1:8443`) saat disimpan.
+
+---
+
+## 🧪 15. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash

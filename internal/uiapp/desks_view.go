@@ -23,11 +23,13 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 			if ui.Button(c, "+ Add Desk").Clicked() {
 				a.IsEditingPeer = false
 				a.EditingOriginalDeskID = ""
+				a.NewPeerURL = ""
 				a.NewPeerURLError = ""
 				a.NewPeerID = ""
 				a.NewPeerIDPart1 = ""
 				a.NewPeerIDPart2 = ""
 				a.NewPeerIDPart3 = ""
+				a.NewPeerAlias = ""
 				a.PeerIDReqFocus = 0
 				a.PeerIDFocused = false
 				a.AddPeerModalOpen = true

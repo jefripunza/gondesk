@@ -235,13 +235,42 @@ func (s *Store) DeletePeer(deskID string) error {
 	return s.DB.Where("desk_id = ?", deskID).Delete(&PeerRecord{}).Error
 }
 
+// UpdatePeerDetails updates editable details (alias and endpointURL) for a peer without losing other fields.
+func (s *Store) UpdatePeerDetails(deskID, alias, endpointURL string) (*PeerRecord, error) {
+	deskID = NormalizeDeskID(deskID)
+	var peer PeerRecord
+	if err := s.DB.Where("desk_id = ?", deskID).First(&peer).Error; err != nil {
+		return nil, err
+	}
+	if alias != "" {
+		peer.Alias = alias
+	}
+	peer.EndpointURL = endpointURL
+	if err := s.DB.Save(&peer).Error; err != nil {
+		return nil, err
+	}
+	return &peer, nil
+}
+
 // IncrementPeerConnection bumps the connection count and LastSeenAt timestamp.
+// It will never overwrite an existing peer's non-empty EndpointURL.
 func (s *Store) IncrementPeerConnection(deskID, endpointURL string) {
 	deskID = NormalizeDeskID(deskID)
-	peer, err := s.UpsertPeer(deskID, "", "", "", endpointURL, true)
-	if err == nil && peer != nil {
+	var peer PeerRecord
+	if err := s.DB.Where("desk_id = ?", deskID).First(&peer).Error; err == nil {
 		peer.ConnectionCount++
-		_ = s.DB.Save(peer).Error
+		peer.LastSeenAt = time.Now()
+		peer.Online = true
+		if peer.EndpointURL == "" && endpointURL != "" {
+			peer.EndpointURL = endpointURL
+		}
+		_ = s.DB.Save(&peer).Error
+		return
+	}
+	peerPtr, err := s.UpsertPeer(deskID, "", "", "", endpointURL, true)
+	if err == nil && peerPtr != nil {
+		peerPtr.ConnectionCount++
+		_ = s.DB.Save(peerPtr).Error
 	}
 }
 

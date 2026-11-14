@@ -192,15 +192,17 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 						alias = parsed.Host
 					}
 				}
-				if rawURL == "" {
-					rawURL = a.Cfg.BridgeServerURL
-				}
-
 				if peerID != "" {
-					if a.IsEditingPeer && a.EditingOriginalDeskID != "" && a.EditingOriginalDeskID != peerID {
-						_ = a.Store.DeletePeer(a.EditingOriginalDeskID)
+					if a.IsEditingPeer {
+						if a.EditingOriginalDeskID != "" && a.EditingOriginalDeskID != peerID {
+							_ = a.Store.DeletePeer(a.EditingOriginalDeskID)
+							_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
+						} else {
+							_, _ = a.Store.UpdatePeerDetails(peerID, alias, rawURL)
+						}
+					} else {
+						_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
 					}
-					_, _ = a.Store.UpsertPeer(peerID, alias, "", "remote", rawURL, true)
 					isEdit := a.IsEditingPeer
 					a.NewPeerURL = ""
 					a.NewPeerURLError = ""

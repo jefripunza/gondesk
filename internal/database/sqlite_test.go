@@ -97,6 +97,23 @@ func TestStorePeersAndFavorites(t *testing.T) {
 		t.Fatalf("expected connection count >= 1, got %d", incPeer.ConnectionCount)
 	}
 
+	// Verify that calling IncrementPeerConnection with a different URL does NOT overwrite the peer's custom saved URL
+	store.IncrementPeerConnection("111 222 333", "https://127.0.0.1:8443")
+	incPeerAfter, _ := store.GetPeer("111 222 333")
+	if incPeerAfter.EndpointURL != "https://192.168.1.50:8443" {
+		t.Fatalf("expected EndpointURL to remain 'https://192.168.1.50:8443', got '%s'", incPeerAfter.EndpointURL)
+	}
+
+	// Update peer details directly
+	_, err = store.UpdatePeerDetails("111 222 333", "Renamed-PC", "https://custom.desk.io:8443")
+	if err != nil {
+		t.Fatalf("UpdatePeerDetails failed: %v", err)
+	}
+	updatedPeer, _ := store.GetPeer("111 222 333")
+	if updatedPeer.Alias != "Renamed-PC" || updatedPeer.EndpointURL != "https://custom.desk.io:8443" {
+		t.Fatalf("unexpected peer after UpdatePeerDetails: %+v", updatedPeer)
+	}
+
 	// List peers
 	peers, err := store.ListPeers()
 	if err != nil || len(peers) == 0 {

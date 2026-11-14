@@ -239,3 +239,46 @@ func TestRenderRemoteWindowViews(t *testing.T) {
 		t.Fatalf("expected notch offset to be adjustable by drag")
 	}
 }
+
+func TestPeerEditAndConnectURLPersistence(t *testing.T) {
+	appUI, store := setupTestAppUI(t)
+
+	customURL := "https://192.168.1.100:8443"
+	deskID := "170 095 453"
+	alias := "anjay"
+
+	// 1. Initial peer save
+	_, err := store.UpsertPeer(deskID, alias, "", "remote", customURL, true)
+	if err != nil {
+		t.Fatalf("UpsertPeer failed: %v", err)
+	}
+	appUI.ReloadFromDB()
+
+	// 2. Open edit modal
+	p, err := store.GetPeer(deskID)
+	if err != nil {
+		t.Fatalf("GetPeer failed: %v", err)
+	}
+	appUI.openEditPeerModal(*p)
+	if appUI.NewPeerURL != customURL {
+		t.Fatalf("expected NewPeerURL to be %s, got %s", customURL, appUI.NewPeerURL)
+	}
+
+	// 3. User connects to peer
+	appUI.startOutgoingConnection(nil, deskID, "")
+
+	// 4. Verify DB was NOT overwritten with bridge/local URL
+	pAfter, err := store.GetPeer(deskID)
+	if err != nil {
+		t.Fatalf("GetPeer after connect failed: %v", err)
+	}
+	if pAfter.EndpointURL != customURL {
+		t.Fatalf("expected EndpointURL to remain %s, got %s", customURL, pAfter.EndpointURL)
+	}
+
+	// 5. Open edit modal again after connection, must still have customURL
+	appUI.openEditPeerModal(*pAfter)
+	if appUI.NewPeerURL != customURL {
+		t.Fatalf("expected NewPeerURL to still be %s, got %s", customURL, appUI.NewPeerURL)
+	}
+}

@@ -469,7 +469,7 @@ func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSessio
 	ws := m.bridgeWS
 	m.mu.Unlock()
 
-	m.Store.IncrementPeerConnection(target, st.BridgeServerURL)
+	m.Store.IncrementPeerConnection(target, endpointURL)
 	_ = m.Store.RecordSession(sessionID, st.DeskID, target, transportDesc, "active", "Outgoing remote session")
 
 	reqMsg := server.SignalMessage{

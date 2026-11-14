@@ -283,8 +283,9 @@ func (n *UnifiedNode) registerRoutes() {
 
 		st, _ := n.Store.GetSettings()
 		isLocalSelf := database.NormalizeDeskID(deskID) == database.NormalizeDeskID(st.DeskID)
+		remoteEndpoint := c.Query("endpoint_url")
 		if !isLocalSelf || n.Cfg.IsServerMode() {
-			_, _ = n.Store.UpsertPeer(deskID, alias, "", runtime.GOOS+"/"+runtime.GOARCH, n.Cfg.LocalHTTPSURL(), true)
+			_, _ = n.Store.UpsertPeer(deskID, alias, "", runtime.GOOS+"/"+runtime.GOARCH, remoteEndpoint, true)
 		}
 
 		defer func() {
