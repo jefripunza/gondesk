@@ -22,10 +22,9 @@ type AppUI struct {
 	Win     *mygo.Window
 
 	// Navigation & Tab state
-	ActiveTab       int    // 0 = Home / Console, 1 = Settings, >=2 = Active Session index (idx - 2)
+	ActiveTab       int    // 0 = Home / Desks View, 1 = Settings, >=2 = Active Session index (idx - 2)
 	SettingsSection string // "general", "network", "about"
 	FilterTab       int    // 0 = All Desks, 1 = Favorites, 2 = Online Only
-	LeftPaneWidth   float32
 
 	// Local Desk ("This Desk" - Di-remote) state bound to controls
 	DeskID            string
@@ -76,7 +75,6 @@ func NewAppUI(cfg *config.Config, store *database.Store, node *server.UnifiedNod
 		Store:           store,
 		Node:            node,
 		Manager:         mgr,
-		LeftPaneWidth:   340,
 		SettingsSection: "general",
 	}
 	a.ReloadFromDB()
@@ -137,7 +135,7 @@ func (a *AppUI) View(c *ui.Context) {
 		}
 
 		if a.ActiveTab == 0 {
-			a.renderDesktopMainSplit(c, t)
+			a.renderDesksView(c, t)
 		} else if a.ActiveTab == 1 {
 			a.renderDesktopSettings(c, t)
 		} else {
@@ -146,31 +144,13 @@ func (a *AppUI) View(c *ui.Context) {
 				a.renderActiveSessionView(c, t, sessions[sessIdx])
 			} else {
 				a.ActiveTab = 0
-				a.renderDesktopMainSplit(c, t)
+				a.renderDesksView(c, t)
 			}
 		}
 	})
 
 	a.renderAddPeerModal(c, t)
 	a.renderDeleteConfirmModal(c, t)
-}
-
-func (a *AppUI) renderDesktopMainSplit(c *ui.Context, t *ui.Theme) {
-	if a.LeftPaneWidth < 280 {
-		a.LeftPaneWidth = 280
-	} else if a.LeftPaneWidth > 490 {
-		a.LeftPaneWidth = 490
-	}
-	ui.Split(c, &a.LeftPaneWidth, func() {
-		a.renderLeftThisDeskPane(c, t)
-	}, func() {
-		a.renderRightRemoteDeskPane(c, t)
-	}).SplitReset(340).Grow(1).FillWidth()
-	if a.LeftPaneWidth < 280 {
-		a.LeftPaneWidth = 280
-	} else if a.LeftPaneWidth > 490 {
-		a.LeftPaneWidth = 490
-	}
 }
 
 // CleanURL normalizes a URL or host string:

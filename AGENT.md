@@ -153,10 +153,9 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
    - Dilarang keras menumpuk seluruh fungsi antarmuka dalam satu file besar (*bloated file*).
    - Setiap komponen UI yang memiliki konteks atau tanggung jawab berbeda **WAJIB** dipisahkan ke dalam file `.go` tersendiri di dalam package `internal/uiapp/`:
      - `app_ui.go`: Definisi struct `AppUI`, inisialisasi state, lifecycle, frame builder utama `View`, dan helper `CleanURL`.
-     - `header.go`: Top bar navigasi, identitas brand, tab navigasi, dan status single-port.
+     - `header.go`: Top bar navigasi, identitas brand, alamat lokal (Your Address clickable), dan tombol Settings.
      - `banner.go`: Banner notifikasi persetujuan sesi remote masuk (*incoming prompt*).
-     - `left_pane.go`: Panel kiri / sidebar (Your Address 9-digit, form Quick Connect).
-     - `right_pane.go`: Panel kanan / content (Buku alamat peer, filter tabs, pencarian, kartu peer).
+     - `desks_view.go`: Tampilan utama daftar desk, filter tabs (All Desks, Favorites, Online), pencarian, dan kartu peer remote.
      - `modals.go`: Dialog modal popup (dialog tambah desk dan dialog konfirmasi hapus).
      - `active_session.go`: Viewport remote desktop canvas GPU dan sidebar chat/telemetri.
      - `settings.go`: Pengaturan desktop dengan navigasi sidebar menu (`General`, `Network`, `About`).
@@ -175,19 +174,17 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 📐 12. Batasan Rentang Lebar Split Pane (`ui.Split`)
+## 📐 11. Tata Letak Penuh `desks_view.go` & Alamat Lokal di Header
 
-1. **Batas Rentang Lebar Left Pane (Min 280px, Max 490px)**:
-   - Panel kiri (`left_pane`) yang dapat di-resize menggunakan `ui.Split` **WAJIB dibatasi dengan rentang 280px s.d. 490px** (`mentok minimal 280px, maksimal 490px`).
-   - Lebar panel kiri dilarang mengecil di bawah 280px agar konten (kartu *Your Address*, 9 digit ID, tombol) tidak terhimpit menjadi teks vertikal per karakter.
-   - Lebar panel kiri dilarang membesar melebihi 490px agar tidak mendominasi layout desktop remote desks.
-   - Terapkan pembatasan clamping pada nilai split (`if a.LeftPaneWidth < 280 { a.LeftPaneWidth = 280 } else if a.LeftPaneWidth > 490 { a.LeftPaneWidth = 490 }`) serta atribut `.MinWidth(280).MaxWidth(490)` pada elemen root scroll panel kiri.
+1. **Peniadaan Split Pane Samping**:
+   - `left_pane` telah dihapus karena alamat ID lokal (*Your Address*) sudah dipindahkan secara permanen dan terpusat di top bar / header ([header.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/header.go)).
+   - Halaman utama remote desks kini menggunakan tampilan penuh melalui [desks_view.go](file:///Users/jefripunza/Documents/Projects/gondesk/internal/uiapp/desks_view.go) tanpa `ui.Split`.
 2. **Larangan Menampilkan Nilai Ukuran Sementara**:
-   - Teks angka ukuran debugging/sementara (seperti `%.0f px`) di bawah card dilarang dimunculkan kembali setelah kebutuhan inspeksi selesai.
+   - Teks angka ukuran debugging/sementara (seperti `%.0f px`) dilarang dimunculkan kembali setelah kebutuhan inspeksi selesai.
 
 ---
 
-## 🧪 13. Prosedur Verifikasi Sebelum Commit
+## 🧪 12. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
