@@ -136,7 +136,26 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🧪 9. Prosedur Verifikasi Sebelum Commit
+## 🧩 9. Modularitas Arsitektur UI (Larangan File Bloated)
+
+1. **Pemisahan File Berdasarkan Konteks Antarmuka**:
+   - Dilarang keras menumpuk seluruh fungsi antarmuka dalam satu file besar (*bloated file*).
+   - Setiap komponen UI yang memiliki konteks atau tanggung jawab berbeda **WAJIB** dipisahkan ke dalam file `.go` tersendiri di dalam package `internal/uiapp/`:
+     - `app_ui.go`: Definisi struct `AppUI`, inisialisasi state, lifecycle, frame builder utama `View`, dan helper `CleanURL`.
+     - `header.go`: Top bar navigasi, identitas brand, dan tombol switch mode.
+     - `banner.go`: Banner notifikasi persetujuan sesi remote masuk (*incoming prompt*).
+     - `left_pane.go`: Panel kiri / sidebar (Your Address 9-digit, form Quick Connect).
+     - `right_pane.go`: Panel kanan / content (Buku alamat peer, filter tabs, pencarian, kartu peer).
+     - `modals.go`: Dialog modal popup (dialog tambah desk dan dialog konfirmasi hapus).
+     - `active_session.go`: Viewport remote desktop canvas GPU dan sidebar chat/telemetri.
+     - `settings.go`: Form konfigurasi settings desktop.
+     - `server_dashboard.go`: Dashboard metrik & audit logs mode server bridge.
+2. **Kaidah Penambahan Fitur UI Baru**:
+   - Setiap kali membuat komponen antarmuka baru dengan konteks berbeda, **wajib dibuatkan file `.go` baru** di package `internal/uiapp/` dengan nama yang deskriptif.
+
+---
+
+## 🧪 10. Prosedur Verifikasi Sebelum Commit
 
 Setiap perubahan wajib lolos verifikasi berikut:
 ```bash
