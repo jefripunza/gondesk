@@ -229,6 +229,7 @@ func (n *UnifiedNode) registerRoutes() {
 	api.Get("/turn/credentials", func(c *fiber.Ctx) error {
 		creds, _ := n.Store.ListTurnCredentials()
 		username := "gondesk"
+		// #nosec G101 -- default local dev TURN credentials fallback
 		password := "gondesk-turn-secret"
 		if len(creds) > 0 {
 			username = creds[0].Username

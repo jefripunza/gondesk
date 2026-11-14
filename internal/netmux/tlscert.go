@@ -72,8 +72,8 @@ func LoadOrGenerateTLSConfig(certPath, keyPath string) (*tls.Config, error) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 
 	if certPath != "" && keyPath != "" {
-		_ = os.MkdirAll(filepath.Dir(certPath), 0o755)
-		_ = os.WriteFile(certPath, certPEM, 0o644)
+		_ = os.MkdirAll(filepath.Dir(certPath), 0o750)
+		_ = os.WriteFile(certPath, certPEM, 0o600)
 		_ = os.WriteFile(keyPath, keyPEM, 0o600)
 	}
 

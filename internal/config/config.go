@@ -58,10 +58,7 @@ func Default() *Config {
 		bridgeURL = fmt.Sprintf("https://127.0.0.1:%d", port)
 	}
 
-	headless := false
-	if mode == ModeServer {
-		headless = true
-	}
+	headless := mode == ModeServer
 	if envHeadless := os.Getenv("GONDESK_HEADLESS"); envHeadless != "" {
 		headless = envHeadless == "1" || envHeadless == "true"
 	}

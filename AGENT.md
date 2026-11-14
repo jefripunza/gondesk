@@ -229,10 +229,13 @@ Setiap perubahan wajib lolos verifikasi berikut:
 # 1. Analisis statis MyGo UI
 go tool mygo vet .
 
-# 2. Pengujian unit UI & integrasi Single-Port
+# 2. Pengujian linter ketat golangci-lint (sesuai .golangci.yml)
+golangci-lint run ./...
+
+# 3. Pengujian unit UI & integrasi Single-Port
 go test -v ./...
 
-# 3. Kompilasi bersih semua paket
+# 4. Kompilasi bersih semua paket
 go build -v ./...
 ```
 

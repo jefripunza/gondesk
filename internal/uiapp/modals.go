@@ -100,7 +100,7 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				}
 				in2.HandleInput(func(ev ui.InputEvent) bool {
 					if ev.Kind == ui.InputKeyDown && ev.Key == ui.KeyBackspace {
-						if a.NewPeerIDPart2 == "" && len(a.NewPeerIDPart1) > 0 {
+						if a.NewPeerIDPart2 == "" && a.NewPeerIDPart1 != "" {
 							a.NewPeerIDPart1 = a.NewPeerIDPart1[:len(a.NewPeerIDPart1)-1]
 							a.PeerIDReqFocus = 1
 							a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
@@ -118,7 +118,7 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 				}
 				in3.HandleInput(func(ev ui.InputEvent) bool {
 					if ev.Kind == ui.InputKeyDown && ev.Key == ui.KeyBackspace {
-						if a.NewPeerIDPart3 == "" && len(a.NewPeerIDPart2) > 0 {
+						if a.NewPeerIDPart3 == "" && a.NewPeerIDPart2 != "" {
 							a.NewPeerIDPart2 = a.NewPeerIDPart2[:len(a.NewPeerIDPart2)-1]
 							a.PeerIDReqFocus = 2
 							a.NewPeerID = a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
@@ -128,13 +128,14 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 					return false
 				})
 
-				if a.PeerIDReqFocus == 1 {
+				switch a.PeerIDReqFocus {
+				case 1:
 					in1.Focus().SetTextSelection(len(a.NewPeerIDPart1), len(a.NewPeerIDPart1))
 					a.PeerIDReqFocus = 0
-				} else if a.PeerIDReqFocus == 2 {
+				case 2:
 					in2.Focus().SetTextSelection(len(a.NewPeerIDPart2), len(a.NewPeerIDPart2))
 					a.PeerIDReqFocus = 0
-				} else if a.PeerIDReqFocus == 3 {
+				case 3:
 					in3.Focus().SetTextSelection(len(a.NewPeerIDPart3), len(a.NewPeerIDPart3))
 					a.PeerIDReqFocus = 0
 				}
@@ -145,11 +146,12 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 
 		if idFieldBox.Clicked() && !a.PeerIDFocused {
 			a.PeerIDFocused = true
-			if len(a.NewPeerIDPart1) < 3 {
+			switch {
+			case len(a.NewPeerIDPart1) < 3:
 				a.PeerIDReqFocus = 1
-			} else if len(a.NewPeerIDPart2) < 3 {
+			case len(a.NewPeerIDPart2) < 3:
 				a.PeerIDReqFocus = 2
-			} else {
+			default:
 				a.PeerIDReqFocus = 3
 			}
 		}

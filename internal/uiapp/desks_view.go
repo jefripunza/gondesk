@@ -42,8 +42,7 @@ func (a *AppUI) renderDesksView(c *ui.Context, t *ui.Theme) {
 			})
 		} else {
 			ui.Column(c).Gap(10).Children(func() {
-				for _, peer := range filteredPeers {
-					p := peer
+				for _, p := range filteredPeers {
 					ui.Row(c.Key("peer-card-"+p.DeskID)).Padding(14, 16).Gap(14).Radius(10).
 						Background(t.Surface).Border(1, t.Border).AlignItems(ui.Center).
 						Children(func() {

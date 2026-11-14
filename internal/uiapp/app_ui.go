@@ -70,8 +70,7 @@ type AppUI struct {
 	PendingDeletePeerAlias string
 
 	// Focus tracking for onblur URL normalization
-	quickConnectURLFocused bool
-	modalPeerURLFocused    bool
+	modalPeerURLFocused bool
 
 	// Cached SQLite records refreshed on state changes
 	Peers       []database.PeerRecord
@@ -234,7 +233,7 @@ func ValidateHostURL(raw string) (string, string) {
 // Numeric TLDs (e.g. 192.168.1.300) are rejected as invalid domains.
 func isValidDomainOrHostname(h string) bool {
 	h = strings.TrimSuffix(h, ".")
-	if len(h) == 0 || len(h) > 253 {
+	if h == "" || len(h) > 253 {
 		return false
 	}
 	if strings.ContainsAny(h, " /\\:@?#") {
@@ -243,15 +242,15 @@ func isValidDomainOrHostname(h string) bool {
 
 	labels := strings.Split(h, ".")
 	for _, label := range labels {
-		if len(label) == 0 || len(label) > 63 {
+		if label == "" || len(label) > 63 {
 			return false
 		}
 		if label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}
-		for i := 0; i < len(label); i++ {
+		for i := range len(label) {
 			c := label[i]
-			if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') {
+			if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' {
 				return false
 			}
 		}
@@ -259,7 +258,7 @@ func isValidDomainOrHostname(h string) bool {
 
 	lastLabel := labels[len(labels)-1]
 	allDigits := true
-	for i := 0; i < len(lastLabel); i++ {
+	for i := range len(lastLabel) {
 		if lastLabel[i] < '0' || lastLabel[i] > '9' {
 			allDigits = false
 			break
@@ -296,15 +295,16 @@ func (a *AppUI) syncPeerID() {
 	combined := a.NewPeerIDPart1 + a.NewPeerIDPart2 + a.NewPeerIDPart3
 	if a.NewPeerID != combined {
 		clean := FilterOnlyDigits(a.NewPeerID, 9)
-		if len(clean) <= 3 {
+		switch {
+		case len(clean) <= 3:
 			a.NewPeerIDPart1 = clean
 			a.NewPeerIDPart2 = ""
 			a.NewPeerIDPart3 = ""
-		} else if len(clean) <= 6 {
+		case len(clean) <= 6:
 			a.NewPeerIDPart1 = clean[0:3]
 			a.NewPeerIDPart2 = clean[3:]
 			a.NewPeerIDPart3 = ""
-		} else {
+		default:
 			a.NewPeerIDPart1 = clean[0:3]
 			a.NewPeerIDPart2 = clean[3:6]
 			a.NewPeerIDPart3 = clean[6:]

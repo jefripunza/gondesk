@@ -17,14 +17,14 @@ import (
 
 // AppSetting stores the local GonDesk profile and configuration in SQLite.
 type AppSetting struct {
-	ID                uint      `gorm:"primaryKey" json:"id"`
+	ID                uint      `gorm:"primaryKey"                   json:"id"`
 	DeskID            string    `gorm:"uniqueIndex;size:32;not null" json:"desk_id"`
-	Alias             string    `gorm:"size:64;not null" json:"alias"`
-	AccessPassword    string    `gorm:"size:128" json:"access_password"`
+	Alias             string    `gorm:"size:64;not null"             json:"alias"`
+	AccessPassword    string    `gorm:"size:128"                     json:"access_password"`
 	UnattendedEnabled bool      `json:"unattended_enabled"`
 	AllowControl      bool      `json:"allow_control"`
 	AllowClipboard    bool      `json:"allow_clipboard"`
-	BridgeServerURL   string    `gorm:"size:255" json:"bridge_server_url"`
+	BridgeServerURL   string    `gorm:"size:255"                     json:"bridge_server_url"`
 	SinglePort        int       `json:"single_port"`
 	EnableHTTPS       bool      `json:"enable_https"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -32,12 +32,12 @@ type AppSetting struct {
 
 // PeerRecord represents a discovered or saved GonDesk peer (Address Book / Recent Sessions / Online Bridge Registry).
 type PeerRecord struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
+	ID              uint      `gorm:"primaryKey"                   json:"id"`
 	DeskID          string    `gorm:"uniqueIndex;size:32;not null" json:"desk_id"`
-	Alias           string    `gorm:"size:64" json:"alias"`
-	Hostname        string    `gorm:"size:128" json:"hostname"`
-	OS              string    `gorm:"size:32" json:"os"`
-	EndpointURL     string    `gorm:"size:255" json:"endpoint_url"`
+	Alias           string    `gorm:"size:64"                      json:"alias"`
+	Hostname        string    `gorm:"size:128"                     json:"hostname"`
+	OS              string    `gorm:"size:32"                      json:"os"`
+	EndpointURL     string    `gorm:"size:255"                     json:"endpoint_url"`
 	Online          bool      `json:"online"`
 	IsFavorite      bool      `json:"is_favorite"`
 	LastSeenAt      time.Time `json:"last_seen_at"`
@@ -46,23 +46,23 @@ type PeerRecord struct {
 
 // SessionLog records remote desktop or bridge relay sessions in SQLite.
 type SessionLog struct {
-	ID            uint       `gorm:"primaryKey" json:"id"`
+	ID            uint       `gorm:"primaryKey"                   json:"id"`
 	SessionUUID   string     `gorm:"uniqueIndex;size:64;not null" json:"session_uuid"`
-	ClientDeskID  string     `gorm:"index;size:32;not null" json:"client_desk_id"`
-	HostDeskID    string     `gorm:"index;size:32;not null" json:"host_desk_id"`
-	TransportMode string     `gorm:"size:64" json:"transport_mode"` // e.g., "HTTPS-WSS-SinglePort", "TURNS-SinglePort", "Direct-HTTPS"
-	Status        string     `gorm:"size:32" json:"status"`         // "active", "completed", "rejected"
+	ClientDeskID  string     `gorm:"index;size:32;not null"       json:"client_desk_id"`
+	HostDeskID    string     `gorm:"index;size:32;not null"       json:"host_desk_id"`
+	TransportMode string     `gorm:"size:64"                      json:"transport_mode"` // e.g., "HTTPS-WSS-SinglePort", "TURNS-SinglePort", "Direct-HTTPS"
+	Status        string     `gorm:"size:32"                      json:"status"`         // "active", "completed", "rejected"
 	StartedAt     time.Time  `json:"started_at"`
 	EndedAt       *time.Time `json:"ended_at,omitempty"`
-	Notes         string     `gorm:"size:255" json:"notes"`
+	Notes         string     `gorm:"size:255"                     json:"notes"`
 }
 
 // TurnCredential stores TURN server authentication accounts in SQLite.
 type TurnCredential struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
+	ID        uint      `gorm:"primaryKey"                   json:"id"`
 	Username  string    `gorm:"uniqueIndex;size:64;not null" json:"username"`
-	Password  string    `gorm:"size:128;not null" json:"password"`
-	Realm     string    `gorm:"size:64;not null" json:"realm"`
+	Password  string    `gorm:"size:128;not null"            json:"password"`
+	Realm     string    `gorm:"size:64;not null"             json:"realm"`
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -75,7 +75,7 @@ type Store struct {
 // Open initializes the SQLite database using GORM (pure-Go glebarez/sqlite driver)
 // and runs schema migrations plus initial seed data.
 func Open(dbPath string, defaultPort int, defaultBridgeURL string) (*Store, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o750); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
@@ -130,6 +130,7 @@ func (s *Store) ensureDefaults(defaultPort int, defaultBridgeURL string) error {
 		return err
 	}
 	if turnCount == 0 {
+		// #nosec G101 -- default local TURN credential for initial development setup
 		cred := TurnCredential{
 			Username:  "gondesk",
 			Password:  "gondesk-turn-secret",
@@ -309,6 +310,7 @@ func GenerateDeskID() string {
 		if i == 0 && n.Int64() == 0 {
 			digits[i] = '4'
 		} else {
+			// #nosec G115 -- n.Int64() is securely bounded [0, 9] from big.NewInt(10)
 			digits[i] = byte('0' + n.Int64())
 		}
 	}

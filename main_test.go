@@ -37,7 +37,18 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	mgr := remote.NewManager(cfg, store, nil, nil)
 	appUI := uiapp.NewAppUI(cfg, store, nil, mgr)
 
-	// 1. Verify Desktop Mode renders "Your Address" and "All Desks" (and NOT "Discovered & Saved Desks")
+	testDesktopHeaderAndTabs(t, appUI)
+	testQuickConnect(t, appUI)
+	testPeerModalAddAndValidation(t, appUI, store)
+	testEditAndRemoteWindow(t, appUI, store)
+	testModalCancelAndBackdrop(t, appUI)
+	testDeleteConfirmationModal(t, appUI, store)
+	testSettingsSidebar(t, appUI)
+	testServerModeConfig(t)
+}
+
+func testDesktopHeaderAndTabs(t *testing.T, appUI *uiapp.AppUI) {
+	t.Helper()
 	tt := ui.NewTester(appUI.View, 1120, 720)
 	if !tt.HasText("Your Address") || !tt.HasText("All Desks") || !tt.HasText(appUI.DeskID) {
 		t.Fatalf("expected Desktop Mode UI to show 'Your Address', 'All Desks', and DeskID %q; got texts: %v", appUI.DeskID, tt.Texts())
@@ -57,13 +68,16 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if tt.HasText("340 px") || tt.HasText("280 px") || tt.HasText("490 px") || tt.HasText("81 px") {
 		t.Fatalf("expected width indicator text to be removed; got texts: %v", tt.Texts())
 	}
-
-	// Verify Desks View has search, filter tabs, and + Add Desk button
 	if !tt.HasText("+ Add Desk") || !tt.HasText("Favorites ★") || !tt.HasText("Online") {
 		t.Fatalf("expected Desks View to show '+ Add Desk' and filter tabs; got texts: %v", tt.Texts())
 	}
+	if tt.HasText("Switch to Server Mode") {
+		t.Fatalf("expected 'Switch to Server Mode' button to be removed from Desktop UI; got texts: %v", tt.Texts())
+	}
+}
 
-	// Verify connecting via Name (optional) + URL (http/https required) adds to Discovered & Saved Desks list
+func testQuickConnect(t *testing.T, appUI *uiapp.AppUI) {
+	t.Helper()
 	appUI.QuickConnectName = "Kantor-Cabang-Server"
 	appUI.QuickConnectURL = "https://10.20.30.40:8443"
 	ttConnect := ui.NewTester(func(c *ui.Context) {
@@ -73,8 +87,10 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !ttConnect.HasText("Kantor-Cabang-Server") {
 		t.Fatalf("expected connected URL peer 'Kantor-Cabang-Server' to appear in Discovered & Saved Desks list; got texts: %v", ttConnect.Texts())
 	}
+}
 
-	// Verify modal dialog does not close when clicking outside (backdrop)
+func testPeerModalAddAndValidation(t *testing.T, appUI *uiapp.AppUI, store *database.Store) {
+	t.Helper()
 	appUI.AddPeerModalOpen = true
 	ttModal := ui.NewTester(appUI.View, 1120, 720)
 	if !ttModal.HasText("Add Desk to Address Book") {
@@ -84,7 +100,6 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected 'Endpoint URL' to be renamed to 'URL'")
 	}
 
-	// Verify modal URL validation: path/endpoint is rejected and red error text is rendered
 	appUI.NewPeerURL = "https://10.20.30.40:8443/api/v1"
 	cleaned, errMsg := uiapp.ValidateHostURL(appUI.NewPeerURL)
 	appUI.NewPeerURL = cleaned
@@ -94,14 +109,12 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !ttModalErr.HasText(expectedErrMsg) {
 		t.Fatalf("expected modal to show red error text %q; got texts: %v", expectedErrMsg, ttModalErr.Texts())
 	}
-	// Attempting to Save Desk with invalid URL must be blocked
-	ttModalErr.Click("Save Desk")
+	_ = ttModalErr.Click("Save Desk")
 	ttModalErr.Frame()
 	if !appUI.AddPeerModalOpen {
 		t.Fatalf("expected modal to remain open when Save Desk is clicked with invalid URL")
 	}
 
-	// Correct the URL to pure IP:Port
 	appUI.NewPeerURL = "10.20.30.40:8443"
 	cleaned, errMsg = uiapp.ValidateHostURL(appUI.NewPeerURL)
 	appUI.NewPeerURL = cleaned
@@ -111,18 +124,16 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected red error text to disappear after valid URL; got texts: %v", ttModalValid.Texts())
 	}
 
-	// Verify GonDesk ID field: must be numeric digits only, styled with gap, zero space character in value
 	if !ttModalValid.HasText("GonDesk ID (e.g. 612 840 193)") {
 		t.Fatalf("expected modal to show GonDesk ID placeholder; got texts: %v", ttModalValid.Texts())
 	}
-	// Test FilterOnlyDigits
 	if filtered := uiapp.FilterOnlyDigits("612abc840xyz193", 9); filtered != "612840193" {
 		t.Fatalf("expected '612840193', got %q", filtered)
 	}
 	if filtered := uiapp.FilterOnlyDigits("816 692 488", 9); filtered != "816692488" {
 		t.Fatalf("expected '816692488', got %q", filtered)
 	}
-	// Enter ID into appUI
+
 	appUI.NewPeerID = "612840193"
 	appUI.NewPeerAlias = "Linux-Workstation"
 	ttModalValid.Frame()
@@ -133,13 +144,12 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if strings.Contains(appUI.NewPeerID, " ") {
 		t.Fatalf("NewPeerID must not contain space characters; got %q", appUI.NewPeerID)
 	}
-	// Save the desk with the new ID
-	ttModalValid.Click("Save Desk")
+	_ = ttModalValid.Click("Save Desk")
 	ttModalValid.Frame()
 	if appUI.AddPeerModalOpen {
 		t.Fatalf("expected modal to close after saving valid desk")
 	}
-	// Verify peer saved in store with normalized ID
+
 	peers, err := store.ListPeers()
 	if err != nil {
 		t.Fatalf("ListPeers: %v", err)
@@ -154,14 +164,15 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !found {
 		t.Fatalf("expected peer '612 840 193' in peers list: %v", peers)
 	}
+}
 
-	// Verify Edit button ("✏️") is present between Favorite ("☆") and Delete ("🗑") on the peer card
+func testEditAndRemoteWindow(t *testing.T, appUI *uiapp.AppUI, store *database.Store) {
+	t.Helper()
 	ttDesks := ui.NewTester(appUI.View, 1120, 720)
 	if !ttDesks.HasText("✏️") {
 		t.Fatalf("expected peer card to have Edit button '✏️'; got texts: %v", ttDesks.Texts())
 	}
-	// Click the edit button
-	ttDesks.Click("✏️")
+	_ = ttDesks.Click("✏️")
 	ttDesks.Frame()
 	if !appUI.AddPeerModalOpen || !appUI.IsEditingPeer {
 		t.Fatalf("expected modal to open in edit mode; AddPeerModalOpen=%v, IsEditingPeer=%v",
@@ -177,14 +188,14 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if appUI.NewPeerAlias != "Linux-Workstation" {
 		t.Fatalf("expected pre-filled alias 'Linux-Workstation', got %q", appUI.NewPeerAlias)
 	}
-	// Modify alias and save
+
 	appUI.NewPeerAlias = "Linux-Workstation-Renamed"
-	ttDesks.Click("Save Changes")
+	_ = ttDesks.Click("Save Changes")
 	ttDesks.Frame()
 	if appUI.AddPeerModalOpen {
 		t.Fatalf("expected edit modal to close after saving changes")
 	}
-	// Verify update in store
+
 	updatedPeer, err := store.GetPeer("612 840 193")
 	if err != nil {
 		t.Fatalf("GetPeer error: %v", err)
@@ -193,31 +204,26 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected alias 'Linux-Workstation-Renamed', got %q", updatedPeer.Alias)
 	}
 
-	// Verify remote window pure black screen with "Connecting ..."
 	ttRemote := ui.NewTester(uiapp.RenderConnectingView, 1024, 640)
 	if !ttRemote.HasText("Connecting ...") {
 		t.Fatalf("expected remote window to show 'Connecting ...'; got texts: %v", ttRemote.Texts())
 	}
 
-	// Verify Connect button on peer card
 	if !ttDesks.HasText("Connect") {
 		t.Fatalf("expected peer card to have 'Connect' button; got texts: %v", ttDesks.Texts())
 	}
-	// Simulate opening remote window for peer
 	appUI.OpenRemoteWindow("612 840 193", "Linux-Workstation-Renamed")
 	ttDesks.Frame()
 	if !appUI.IsDeskConnected("612 840 193") {
 		t.Fatalf("expected desk '612 840 193' to be marked as connected")
 	}
-	// Verify button changes to "Disconnect" and old in-window active session screen is NOT rendered
 	if !ttDesks.HasText("Disconnect") {
 		t.Fatalf("expected peer card button to become 'Disconnect'; got texts: %v", ttDesks.Texts())
 	}
 	if ttDesks.HasText("REMOTE DESKTOP STREAM") || ttDesks.HasText("Session Chat & Telemetry") || ttDesks.HasText("Send Ctrl+Alt+Del") {
 		t.Fatalf("old in-window session view must NOT be rendered; got texts: %v", ttDesks.Texts())
 	}
-	// Click "Disconnect"
-	ttDesks.Click("Disconnect")
+	_ = ttDesks.Click("Disconnect")
 	ttDesks.Frame()
 	if appUI.IsDeskConnected("612 840 193") {
 		t.Fatalf("expected desk '612 840 193' to be disconnected")
@@ -225,41 +231,41 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !ttDesks.HasText("Connect") {
 		t.Fatalf("expected button to revert to 'Connect'; got texts: %v", ttDesks.Texts())
 	}
+}
 
-	// Reopen modal to verify Cancel and backdrop behavior
+func testModalCancelAndBackdrop(t *testing.T, appUI *uiapp.AppUI) {
+	t.Helper()
 	appUI.AddPeerModalOpen = true
 	appUI.NewPeerID = "123123193"
-	ttModal.Frame()
+	ttModal := ui.NewTester(appUI.View, 1120, 720)
 	if appUI.NewPeerIDPart1 != "123" || appUI.NewPeerIDPart2 != "123" || appUI.NewPeerIDPart3 != "193" {
 		t.Fatalf("expected parts 123 123 193, got %s %s %s", appUI.NewPeerIDPart1, appUI.NewPeerIDPart2, appUI.NewPeerIDPart3)
 	}
 
-	// Verify continuous backspace across segments: deleting in part 3 continues into part 2 and 1
 	appUI.NewPeerIDPart3 = ""
 	appUI.PeerIDReqFocus = 3
 	appUI.NewPeerID = appUI.NewPeerIDPart1 + appUI.NewPeerIDPart2 + appUI.NewPeerIDPart3
 	ttModal.Frame()
-	// Backspace in empty part 3 deletes last digit of part 2
 	ttModal.Key(0, ui.KeyBackspace)
 	ttModal.Frame()
 	if appUI.NewPeerIDPart2 != "12" {
 		t.Fatalf("expected backspace in empty part 3 to delete last digit of part 2; got %q", appUI.NewPeerIDPart2)
 	}
 
-	// Click outside the modal dialog (at top-left backdrop coordinate)
 	ttModal.ClickAt(10, 10)
 	ttModal.Frame()
 	if !appUI.AddPeerModalOpen {
 		t.Fatalf("modal should NOT close when clicking outside; expected AddPeerModalOpen=true")
 	}
-	// Verify Cancel button explicitly closes the modal
-	ttModal.Click("Cancel")
+	_ = ttModal.Click("Cancel")
 	ttModal.Frame()
 	if appUI.AddPeerModalOpen {
 		t.Fatalf("modal should close when clicking Cancel button; expected AddPeerModalOpen=false")
 	}
+}
 
-	// Verify delete button ("🗑") and confirmation modal
+func testDeleteConfirmationModal(t *testing.T, appUI *uiapp.AppUI, store *database.Store) {
+	t.Helper()
 	appUI.PendingDeletePeerID = "482 910 374"
 	appUI.PendingDeletePeerAlias = "Workstation-MacPro"
 	appUI.DeleteConfirmModalOpen = true
@@ -267,20 +273,17 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 	if !ttDelModal.HasText("Hapus Desk") || !ttDelModal.HasText("Konfirmasi Penghapusan") {
 		t.Fatalf("expected delete confirmation modal to be open; got texts: %v", ttDelModal.Texts())
 	}
-	// Clicking outside does not close delete modal
 	ttDelModal.ClickAt(10, 10)
 	ttDelModal.Frame()
 	if !appUI.DeleteConfirmModalOpen {
 		t.Fatalf("delete modal should NOT close when clicking outside; expected DeleteConfirmModalOpen=true")
 	}
-	// Clicking "Batal" closes modal
-	ttDelModal.Click("Batal")
+	_ = ttDelModal.Click("Batal")
 	ttDelModal.Frame()
 	if appUI.DeleteConfirmModalOpen {
 		t.Fatalf("delete modal should close on 'Batal'; expected DeleteConfirmModalOpen=false")
 	}
 
-	// Verify executing delete through Store.DeletePeer
 	if err := store.DeletePeer("482 910 374"); err != nil {
 		t.Fatalf("failed to delete peer from store: %v", err)
 	}
@@ -290,8 +293,10 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 			t.Fatalf("expected peer 482 910 374 to be deleted from store, but still found")
 		}
 	}
+}
 
-	// Verify Settings View with Sidebar Menu (General, Network, About)
+func testSettingsSidebar(t *testing.T, appUI *uiapp.AppUI) {
+	t.Helper()
 	appUI.ActiveTab = 1
 	appUI.SettingsSection = "general"
 	ttSettings := ui.NewTester(appUI.View, 1120, 720)
@@ -302,45 +307,38 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected General settings section to be displayed; got texts: %v", ttSettings.Texts())
 	}
 
-	// Switch to Network section
 	appUI.SettingsSection = "network"
 	ttSettings.Frame()
 	if !ttSettings.HasText("GonDesk Network & Single-Port Configuration") || !ttSettings.HasText("Global Bridge Server URL") {
 		t.Fatalf("expected Network settings section to be displayed; got texts: %v", ttSettings.Texts())
 	}
 
-	// Switch to About section
 	appUI.SettingsSection = "about"
 	ttSettings.Frame()
 	if !ttSettings.HasText("About GonDesk") || !ttSettings.HasText("v0.1.0") || !ttSettings.HasText("MIT License") {
 		t.Fatalf("expected About settings section to be displayed; got texts: %v", ttSettings.Texts())
 	}
 
-	// Clicking Back to Home returns to main view
-	ttSettings.Click("Back to Home")
+	_ = ttSettings.Click("Back to Home")
 	ttSettings.Frame()
 	if appUI.ActiveTab != 0 {
 		t.Fatalf("expected clicking 'Back to Home' to reset ActiveTab to 0, got %d", appUI.ActiveTab)
 	}
 
-	// Verify clicking ⚙ Settings button toggles settings view
-	ttSettings.Click("⚙ Settings")
+	_ = ttSettings.Click("⚙ Settings")
 	ttSettings.Frame()
 	if appUI.ActiveTab != 1 {
 		t.Fatalf("expected clicking '⚙ Settings' to set ActiveTab to 1, got %d", appUI.ActiveTab)
 	}
-	ttSettings.Click("⚙ Settings")
+	_ = ttSettings.Click("⚙ Settings")
 	ttSettings.Frame()
 	if appUI.ActiveTab != 0 {
 		t.Fatalf("expected clicking '⚙ Settings' again to toggle ActiveTab back to 0, got %d", appUI.ActiveTab)
 	}
+}
 
-	// 2. Verify Desktop UI does NOT contain "Switch to Server Mode"
-	if tt.HasText("Switch to Server Mode") {
-		t.Fatalf("expected 'Switch to Server Mode' button to be removed from Desktop UI; got texts: %v", tt.Texts())
-	}
-
-	// 3. Verify Server Mode Config is headless and has desktop features disabled
+func testServerModeConfig(t *testing.T) {
+	t.Helper()
 	serverCfg := config.Default()
 	serverCfg.Mode = config.ModeServer
 	if serverCfg.ShowDesktopFeatures() {
@@ -371,7 +369,7 @@ func TestSinglePortHTTPSAndTURNAndWebSocket(t *testing.T) {
 		t.Fatalf("new unified node: %v", err)
 	}
 	node.Start()
-	defer node.Stop()
+	defer func() { _ = node.Stop() }()
 
 	port := node.Mux.Port()
 	httpsURL := fmt.Sprintf("https://127.0.0.1:%d", port)
@@ -380,6 +378,7 @@ func TestSinglePortHTTPSAndTURNAndWebSocket(t *testing.T) {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
+			// #nosec G402 -- self-signed certificate in local loopback integration test
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
@@ -387,7 +386,7 @@ func TestSinglePortHTTPSAndTURNAndWebSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HTTPS GET /api/v1/info on single port %d failed: %v", port, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", resp.StatusCode)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -104,6 +105,7 @@ func (m *Manager) ReconnectBridge() {
 	httpClient := &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
+			// #nosec G402 -- self-signed certificate on local/peer mesh single port
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
@@ -133,10 +135,14 @@ func (m *Manager) ReconnectBridge() {
 		return
 	}
 	dialer := websocket.Dialer{
+		// #nosec G402 -- self-signed certificate on local/peer mesh single port
 		TLSClientConfig:  &tls.Config{InsecureSkipVerify: true},
 		HandshakeTimeout: 5 * time.Second,
 	}
-	conn, _, err := dialer.Dial(wsURL, nil)
+	conn, wsResp, err := dialer.Dial(wsURL, nil)
+	if wsResp != nil && wsResp.Body != nil {
+		_ = wsResp.Body.Close()
+	}
 	if err != nil {
 		m.mu.Lock()
 		m.bridgeOnline = false
@@ -257,11 +263,11 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 // ConnectToPeer initiates a remote desktop connection to targetDeskOrURL over the single port.
 func (m *Manager) ConnectToPeer(targetDeskOrURL, password string) (*ActiveSession, error) {
 	if !m.Cfg.ShowDesktopFeatures() {
-		return nil, fmt.Errorf("remote desktop client features are disabled in server mode")
+		return nil, errors.New("remote desktop client features are disabled in server mode")
 	}
 	target := database.NormalizeDeskID(targetDeskOrURL)
 	if target == "" {
-		return nil, fmt.Errorf("remote desk ID or address is required")
+		return nil, errors.New("remote desk ID or address is required")
 	}
 
 	st, _ := m.Store.GetSettings()
@@ -581,6 +587,7 @@ func ProbeSTUNOverTLS(endpointURL string) (string, error) {
 	var conn net.Conn
 	dialer := &net.Dialer{Timeout: 3 * time.Second}
 	if u.Scheme == "https" || u.Scheme == "turns" {
+		// #nosec G402 -- self-signed certificate on local single port STUN probe
 		conn, err = tls.DialWithDialer(dialer, "tcp", host, &tls.Config{InsecureSkipVerify: true})
 	} else {
 		conn, err = dialer.Dial("tcp", host)
@@ -588,7 +595,7 @@ func ProbeSTUNOverTLS(endpointURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 
 	msg, err := stun.Build(stun.TransactionID, stun.BindingRequest)
@@ -610,4 +617,3 @@ func ProbeSTUNOverTLS(endpointURL string) (string, error) {
 	}
 	return xorAddr.String(), nil
 }
-
