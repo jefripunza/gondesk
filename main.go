@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -55,9 +54,9 @@ func main() {
 		return
 	}
 
-	winTitle := fmt.Sprintf("GonDesk — Remote Desktop (1-Port HTTPS + TURN :%d)", cfg.ListenPort)
+	winTitle := "GonDesk - Remote Desktop"
 	if cfg.IsServerMode() {
-		winTitle = fmt.Sprintf("GonDesk Server — Global Bridge (1-Port HTTPS + TURN :%d)", cfg.ListenPort)
+		winTitle = "GonDesk Server - Global Bridge"
 	}
 
 	mygo.App.WhenReady(func() {
