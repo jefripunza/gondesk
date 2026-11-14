@@ -264,6 +264,12 @@ func (s *Store) ToggleFavorite(deskID string) error {
 	return s.DB.Save(&peer).Error
 }
 
+// DeletePeer removes a peer record from SQLite by desk_id.
+func (s *Store) DeletePeer(deskID string) error {
+	deskID = NormalizeDeskID(deskID)
+	return s.DB.Where("desk_id = ?", deskID).Delete(&PeerRecord{}).Error
+}
+
 // IncrementPeerConnection bumps the connection count and LastSeenAt timestamp.
 func (s *Store) IncrementPeerConnection(deskID, endpointURL string) {
 	deskID = NormalizeDeskID(deskID)

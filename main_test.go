@@ -75,6 +75,38 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("modal should close when clicking Cancel button; expected AddPeerModalOpen=false")
 	}
 
+	// Verify delete button ("🗑") and confirmation modal
+	appUI.PendingDeletePeerID = "482 910 374"
+	appUI.PendingDeletePeerAlias = "Workstation-MacPro"
+	appUI.DeleteConfirmModalOpen = true
+	ttDelModal := ui.NewTester(appUI.View, 1120, 720)
+	if !ttDelModal.HasText("Hapus Desk") || !ttDelModal.HasText("Konfirmasi Penghapusan") {
+		t.Fatalf("expected delete confirmation modal to be open; got texts: %v", ttDelModal.Texts())
+	}
+	// Clicking outside does not close delete modal
+	ttDelModal.ClickAt(10, 10)
+	ttDelModal.Frame()
+	if !appUI.DeleteConfirmModalOpen {
+		t.Fatalf("delete modal should NOT close when clicking outside; expected DeleteConfirmModalOpen=true")
+	}
+	// Clicking "Batal" closes modal
+	ttDelModal.Click("Batal")
+	ttDelModal.Frame()
+	if appUI.DeleteConfirmModalOpen {
+		t.Fatalf("delete modal should close on 'Batal'; expected DeleteConfirmModalOpen=false")
+	}
+
+	// Verify executing delete through Store.DeletePeer
+	if err := store.DeletePeer("482 910 374"); err != nil {
+		t.Fatalf("failed to delete peer from store: %v", err)
+	}
+	appUI.ReloadFromDB()
+	for _, p := range appUI.Peers {
+		if p.DeskID == "482 910 374" {
+			t.Fatalf("expected peer 482 910 374 to be deleted from store, but still found")
+		}
+	}
+
 	// 2. Switch to Server Mode and verify Desktop features are hidden
 	cfg.Mode = config.ModeServer
 	ttServer := ui.NewTester(appUI.View, 1120, 720)

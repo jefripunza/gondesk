@@ -54,6 +54,11 @@ type AppUI struct {
 	NewPeerID        string
 	NewPeerAlias     string
 
+	// Delete confirmation modal state
+	DeleteConfirmModalOpen bool
+	PendingDeletePeerID    string
+	PendingDeletePeerAlias string
+
 	// Focus tracking for onblur URL normalization
 	quickConnectURLFocused bool
 	modalPeerURLFocused    bool
@@ -160,12 +165,11 @@ func (a *AppUI) View(c *ui.Context) {
 
 	if a.Cfg.ShowDesktopFeatures() {
 		a.renderAddPeerModal(c, t)
+		a.renderDeleteConfirmModal(c, t)
 	}
 }
 
 func (a *AppUI) renderTopBar(c *ui.Context, t *ui.Theme) {
-	bridgeOnline, turnOK, _, _, sessions := a.Manager.Snapshot()
-
 	ui.Row(c).FillWidth().Padding(10, 16).Gap(12).Background(t.Surface).Children(func() {
 		// Brand Pill
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -193,19 +197,6 @@ func (a *AppUI) renderTopBar(c *ui.Context, t *ui.Theme) {
 					a.ActiveTab = 0
 				}
 
-				for i, sess := range sessions {
-					idx := i
-					tabIdx := idx + 2
-					label := fmt.Sprintf("Desk: %s", sess.PeerDeskID)
-					tabBtn := ui.Button(c.Key("sess-tab-"+sess.SessionUUID), label)
-					if a.ActiveTab == tabIdx {
-						tabBtn.Background(t.Accent).TextColor(t.AccentText)
-					}
-					tabBtn.OnClick(func() {
-						a.ActiveTab = tabIdx
-					})
-				}
-
 				settingsBtn := ui.Button(c, "Settings")
 				if a.ActiveTab == 1 {
 					settingsBtn.Background(t.Accent).TextColor(t.AccentText)
@@ -220,14 +211,6 @@ func (a *AppUI) renderTopBar(c *ui.Context, t *ui.Theme) {
 		}
 
 		ui.Spacer(c)
-
-		// Single-Port HTTPS + TURN Status Indicator
-		statusText := fmt.Sprintf("1-Port HTTPS + TURN (:%d)", a.Cfg.ListenPort)
-		statusColor := ui.Hex("#16A34A") // green
-		if a.Cfg.ShowDesktopFeatures() && !bridgeOnline && !turnOK {
-			statusText = fmt.Sprintf("Local 1-Port Ready (:%d)", a.Cfg.ListenPort)
-		}
-		ui.Badge(c, statusText).Background(statusColor.Alpha(0.16)).TextColor(statusColor)
 
 		// Mode Switch Button (allows testing both Desktop and Desktop Server modes from 1 codebase)
 		modeSwitchLabel := "Switch to Server Mode"
@@ -385,6 +368,15 @@ func (a *AppUI) renderRightRemoteDeskPane(c *ui.Context, t *ui.Theme) {
 								_ = a.Store.ToggleFavorite(p.DeskID)
 								a.ReloadFromDB()
 							})
+
+							if ui.Button(c, "🗑").Tooltip("Hapus Desk dari Buku Alamat").Clicked() {
+								a.PendingDeletePeerID = p.DeskID
+								a.PendingDeletePeerAlias = p.Alias
+								if a.PendingDeletePeerAlias == "" {
+									a.PendingDeletePeerAlias = p.DeskID
+								}
+								a.DeleteConfirmModalOpen = true
+							}
 
 							ui.PrimaryButton(c, "Connect").OnClick(func() {
 								a.RemoteTargetInput = p.DeskID
@@ -722,6 +714,55 @@ func (a *AppUI) renderAddPeerModal(c *ui.Context, t *ui.Theme) {
 		// Clicks pada backdrop luar mengaktifkan Dismissed(), kita setel kembali ke true
 		// sesuai aturan baku AGENT.md sehingga dialog TIDAK AKAN tertutup kecuali tombol Cancel/Save di dalam diklik.
 		a.AddPeerModalOpen = true
+	}
+}
+
+func (a *AppUI) renderDeleteConfirmModal(c *ui.Context, t *ui.Theme) {
+	if ui.DialogBase(c, &a.DeleteConfirmModalOpen, func(backdrop, panel ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, 0.85))
+		panel.Width(390).Padding(22).Gap(14).Radius(12).
+			Background(t.Surface).Border(1, t.Border).
+			Shadow(0, 16, 40, 0, ui.RGBA(0, 0, 0, 0.7))
+
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(36, 36).Radius(8).Background(ui.Hex("#EF443B").Alpha(0.15)).Center().Children(func() {
+				ui.Text(c, "🗑").FontSize(18)
+			})
+			ui.Column(c).Gap(2).Children(func() {
+				ui.Text(c, "Hapus Desk").FontSize(16).Bold()
+				ui.Text(c, "Konfirmasi Penghapusan").FontSize(12).TextColor(t.TextMuted)
+			})
+		})
+
+		alias := a.PendingDeletePeerAlias
+		if alias == "" {
+			alias = a.PendingDeletePeerID
+		}
+		ui.Textf(c, "Apakah Anda yakin ingin menghapus desk \"%s\" (%s) dari buku alamat?", alias, a.PendingDeletePeerID).
+			FontSize(13).LineHeight(1.4)
+
+		ui.Row(c).Gap(10).Justify(ui.End).Children(func() {
+			if ui.Button(c, "Batal").Clicked() {
+				a.DeleteConfirmModalOpen = false
+				a.PendingDeletePeerID = ""
+				a.PendingDeletePeerAlias = ""
+			}
+			if ui.PrimaryButton(c, "Hapus Desk").Background(ui.Hex("#EF443B")).Clicked() {
+				if a.Store != nil && a.PendingDeletePeerID != "" {
+					_ = a.Store.DeletePeer(a.PendingDeletePeerID)
+					a.ReloadFromDB()
+					c.Toast("Desk " + alias + " berhasil dihapus")
+				}
+				a.DeleteConfirmModalOpen = false
+				a.PendingDeletePeerID = ""
+				a.PendingDeletePeerAlias = ""
+			}
+		})
+	}).Dismissed() {
+		// PERTAHANKAN MODAL TETAP TERBUKA JIKA DIKLIK DI LUAR
+		// Sesuai aturan baku AGENT.md: Clicks pada backdrop luar mengaktifkan Dismissed(),
+		// kita setel kembali ke true sehingga dialog TIDAK AKAN tertutup kecuali tombol Batal/Hapus di dalam diklik.
+		a.DeleteConfirmModalOpen = true
 	}
 }
 
