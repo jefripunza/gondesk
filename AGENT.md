@@ -96,13 +96,17 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
 
 ---
 
-## 🔀 6. Aturan Dual-Mode (`desktop` vs `server`)
+## 🔀 6. Aturan Desktop Peer-to-Peer & Headless Server Bridge
 
-1. **Satu Kode Sumber (Single Codebase)**:
-   - Mode `desktop` dan `server` dikompilasi dari kode sumber yang sama.
-2. **Isolasi Fitur Desktop**:
-   - Semua fungsi atau antarmuka yang terkait dengan fitur remote desktop klien (*Me-remote* / *Di-remote*) wajib dibatasi oleh `cfg.ShowDesktopFeatures()`.
-   - Pada mode server (`--mode=server` / `GONDESK_MODE=server`), seluruh fitur remote desktop harus disembunyikan (`hidden`) dan request incoming harus ditolak.
+1. **Desktop App Murni Peer-to-Peer (Tanpa Tombol Switch Server di UI)**:
+   - Aplikasi desktop GonDesk berfokus murni pada interaksi remote desktop peer-to-peer antar aplikasi desktop.
+   - **Dilarang keras menyertakan tombol "Switch to Server Mode"** atau menampilkan dashboard server mode di antarmuka desktop.
+2. **Server Mode untuk Headless Bridge (Deployment Docker / VPS)**:
+   - Server mode dijalankan di server / Docker secara headless (`GONDESK_MODE=server`, `GONDESK_HEADLESS=true`) sebagai sentral bridge relay (HTTPS, WebSocket signaling, Pion TURN).
+   - Pengguna desktop yang terhubung ke alamat IP/domain server bridge yang sama dapat saling terhubung peer-to-peer menggunakan ID GonDesk masing-masing.
+3. **Aturan Environment Docker (HANYA `PORT` yang Boleh Dikonfigurasi)**:
+   - Nilai default server mode (`GONDESK_MODE=server`, `GONDESK_HEADLESS=true`, `PORT=8443`) ditetapkan langsung di dalam `Dockerfile`.
+   - Pada `docker-compose.yml` atau saat deployment container, **kurangi konfigurasi env: HANYA `PORT` yang boleh di-set/diubah**. Dilarang mendefinisikan ulang variabel lingkungan lain yang sudah memiliki nilai default baku di Dockerfile.
 
 ---
 
@@ -142,14 +146,13 @@ Setiap kolom input URL (baik pada form koneksi cepat maupun dialog penambahan de
    - Dilarang keras menumpuk seluruh fungsi antarmuka dalam satu file besar (*bloated file*).
    - Setiap komponen UI yang memiliki konteks atau tanggung jawab berbeda **WAJIB** dipisahkan ke dalam file `.go` tersendiri di dalam package `internal/uiapp/`:
      - `app_ui.go`: Definisi struct `AppUI`, inisialisasi state, lifecycle, frame builder utama `View`, dan helper `CleanURL`.
-     - `header.go`: Top bar navigasi, identitas brand, dan tombol switch mode.
+     - `header.go`: Top bar navigasi, identitas brand, tab navigasi, dan status single-port.
      - `banner.go`: Banner notifikasi persetujuan sesi remote masuk (*incoming prompt*).
      - `left_pane.go`: Panel kiri / sidebar (Your Address 9-digit, form Quick Connect).
      - `right_pane.go`: Panel kanan / content (Buku alamat peer, filter tabs, pencarian, kartu peer).
      - `modals.go`: Dialog modal popup (dialog tambah desk dan dialog konfirmasi hapus).
      - `active_session.go`: Viewport remote desktop canvas GPU dan sidebar chat/telemetri.
      - `settings.go`: Pengaturan desktop dengan navigasi sidebar menu (`General`, `Network`, `About`).
-     - `server_dashboard.go`: Dashboard metrik & audit logs mode server bridge.
 2. **Kaidah Penambahan Fitur UI Baru**:
    - Setiap kali membuat komponen antarmuka baru dengan konteks berbeda, **wajib dibuatkan file `.go` baru** di package `internal/uiapp/` dengan nama yang deskriptif.
 

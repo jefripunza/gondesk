@@ -47,6 +47,10 @@ func Default() *Config {
 		if p, err := strconv.Atoi(envPort); err == nil && p > 0 && p <= 65535 {
 			port = p
 		}
+	} else if envPort := os.Getenv("PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil && p > 0 && p <= 65535 {
+			port = p
+		}
 	}
 
 	bridgeURL := os.Getenv("GONDESK_BRIDGE_URL")
@@ -54,9 +58,17 @@ func Default() *Config {
 		bridgeURL = fmt.Sprintf("https://127.0.0.1:%d", port)
 	}
 
+	headless := false
+	if mode == ModeServer {
+		headless = true
+	}
+	if envHeadless := os.Getenv("GONDESK_HEADLESS"); envHeadless != "" {
+		headless = envHeadless == "1" || envHeadless == "true"
+	}
+
 	return &Config{
 		Mode:            mode,
-		Headless:        os.Getenv("GONDESK_HEADLESS") == "1" || os.Getenv("GONDESK_HEADLESS") == "true",
+		Headless:        headless,
 		ListenHost:      "0.0.0.0",
 		ListenPort:      port,
 		PublicIP:        "127.0.0.1",

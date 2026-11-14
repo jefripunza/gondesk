@@ -63,10 +63,6 @@ type AppUI struct {
 	// Active session chat draft
 	ChatDraft string
 
-	// Server Mode: Add TURN Credential form
-	NewTurnUser string
-	NewTurnPass string
-
 	// Cached SQLite records refreshed on state changes
 	Peers       []database.PeerRecord
 	SessionLogs []database.SessionLog
@@ -134,12 +130,6 @@ func (a *AppUI) View(c *ui.Context) {
 		a.renderTopBar(c, t)
 		ui.Divider(c)
 
-		// If running in Server Mode (--mode=server), hide ALL desktop remote & be-remoted UI!
-		if a.Cfg.IsServerMode() {
-			a.renderServerBridgeDashboard(c, t)
-			return
-		}
-
 		// Desktop Mode (can Remote and Be Remoted)
 		_, _, _, incoming, sessions := a.Manager.Snapshot()
 		if incoming != nil {
@@ -161,10 +151,8 @@ func (a *AppUI) View(c *ui.Context) {
 		}
 	})
 
-	if a.Cfg.ShowDesktopFeatures() {
-		a.renderAddPeerModal(c, t)
-		a.renderDeleteConfirmModal(c, t)
-	}
+	a.renderAddPeerModal(c, t)
+	a.renderDeleteConfirmModal(c, t)
 }
 
 func (a *AppUI) renderDesktopMainSplit(c *ui.Context, t *ui.Theme) {

@@ -53,10 +53,7 @@ USER gondesk
 # Environment defaults for Desktop Server (Global Bridge) headless mode
 ENV GONDESK_MODE=server \
     GONDESK_HEADLESS=true \
-    GONDESK_HOST=0.0.0.0 \
-    GONDESK_PORT=8443 \
-    GONDESK_TLS=true \
-    GONDESK_DATA_DIR=/data
+    PORT=8443
 
 # Single Port for HTTPS (GoFiber v2), WSS Signaling, TURNS (TLS/TCP), and TURN/STUN (UDP)
 EXPOSE 8443/tcp
@@ -65,8 +62,8 @@ EXPOSE 8443/udp
 VOLUME ["/data"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -kfsS https://127.0.0.1:${GONDESK_PORT}/api/v1/info || exit 1
+    CMD curl -kfsS https://127.0.0.1:${PORT}/api/v1/info || exit 1
 
 ENTRYPOINT ["/usr/local/bin/gondesk"]
-CMD ["--mode=server", "--headless", "--host=0.0.0.0", "--port=8443", "--data-dir=/data"]
+CMD ["--mode=server", "--headless"]
 

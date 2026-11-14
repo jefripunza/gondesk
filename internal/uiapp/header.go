@@ -1,7 +1,7 @@
 package uiapp
 
 import (
-	"gondesk/internal/config"
+	"fmt"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -15,54 +15,33 @@ func (a *AppUI) renderTopBar(c *ui.Context, t *ui.Theme) {
 			})
 			ui.Column(c).Gap(1).Children(func() {
 				ui.Text(c, "GonDesk").FontSize(15).Bold()
-				if a.Cfg.IsServerMode() {
-					ui.Text(c, "Global Bridge Server").FontSize(11).TextColor(t.TextMuted)
-				} else {
-					ui.Text(c, "Remote Desktop").FontSize(11).TextColor(t.TextMuted)
-				}
+				ui.Text(c, "Remote Desktop").FontSize(11).TextColor(t.TextMuted)
 			})
 		})
 
-		// Navigation Tabs (Only shown in Desktop mode; Server mode hides desktop tabs)
-		if a.Cfg.ShowDesktopFeatures() {
-			ui.Row(c).Gap(6).Margin(0, 0, 0, 12).Children(func() {
-				homeBtn := ui.Button(c, "New Connection")
-				if a.ActiveTab == 0 {
-					homeBtn.Background(t.Accent).TextColor(t.AccentText)
-				}
-				if homeBtn.Clicked() {
-					a.ActiveTab = 0
-				}
+		// Navigation Tabs
+		ui.Row(c).Gap(6).Margin(0, 0, 0, 12).Children(func() {
+			homeBtn := ui.Button(c, "New Connection")
+			if a.ActiveTab == 0 {
+				homeBtn.Background(t.Accent).TextColor(t.AccentText)
+			}
+			if homeBtn.Clicked() {
+				a.ActiveTab = 0
+			}
 
-				settingsBtn := ui.Button(c, "Settings")
-				if a.ActiveTab == 1 {
-					settingsBtn.Background(t.Accent).TextColor(t.AccentText)
-				}
-				if settingsBtn.Clicked() {
-					a.ActiveTab = 1
-				}
-			})
-		} else {
-			ui.Badge(c, "DESKTOP FEATURES HIDDEN (SERVER BRIDGE MODE)").
-				Background(ui.Hex("#2563EB")).TextColor(ui.RGB(255, 255, 255))
-		}
+			settingsBtn := ui.Button(c, "Settings")
+			if a.ActiveTab == 1 {
+				settingsBtn.Background(t.Accent).TextColor(t.AccentText)
+			}
+			if settingsBtn.Clicked() {
+				a.ActiveTab = 1
+			}
+		})
 
 		ui.Spacer(c)
 
-		// Mode Switch Button (allows testing both Desktop and Desktop Server modes from 1 codebase)
-		modeSwitchLabel := "Switch to Server Mode"
-		if a.Cfg.IsServerMode() {
-			modeSwitchLabel = "Switch to Desktop Mode"
-		}
-		if ui.Button(c, modeSwitchLabel).Clicked() {
-			if a.Cfg.IsServerMode() {
-				a.Cfg.Mode = config.ModeDesktop
-				a.Manager.StartBridgeLink()
-				c.Toast("Switched to Desktop Mode (Remote & Be-Remoted Enabled)")
-			} else {
-				a.Cfg.Mode = config.ModeServer
-				c.Toast("Switched to Desktop Server Mode (Desktop Features Hidden)")
-			}
-		}
+		// 1-Port HTTPS + TURN Status Badge
+		ui.Badge(c, fmt.Sprintf("1-Port HTTPS + TURN (:%d)", a.Cfg.ListenPort)).
+			Background(ui.Hex("#16A34A").Alpha(0.15)).TextColor(ui.Hex("#16A34A"))
 	})
 }

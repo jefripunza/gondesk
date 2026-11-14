@@ -177,14 +177,16 @@ func TestDesktopAndServerModeViews(t *testing.T) {
 		t.Fatalf("expected clicking 'Back to Home' to reset ActiveTab to 0, got %d", appUI.ActiveTab)
 	}
 
-	// 2. Switch to Server Mode and verify Desktop features are hidden
-	cfg.Mode = config.ModeServer
-	ttServer := ui.NewTester(appUI.View, 1120, 720)
-	if !ttServer.HasText("GonDesk Global Bridge & TURN Server Mode") {
-		t.Fatalf("expected Server Mode UI to show Global Bridge header; got texts: %v", ttServer.Texts())
+	// 2. Verify Desktop UI does NOT contain "Switch to Server Mode"
+	if tt.HasText("Switch to Server Mode") {
+		t.Fatalf("expected 'Switch to Server Mode' button to be removed from Desktop UI; got texts: %v", tt.Texts())
 	}
-	if ttServer.HasText("Your GonDesk Address") || ttServer.HasText("Host Ready (Di-remote)") {
-		t.Fatalf("expected Desktop features to be hidden in Server Mode, but found them in texts: %v", ttServer.Texts())
+
+	// 3. Verify Server Mode Config is headless and has desktop features disabled
+	serverCfg := config.Default()
+	serverCfg.Mode = config.ModeServer
+	if serverCfg.ShowDesktopFeatures() {
+		t.Fatalf("expected ShowDesktopFeatures to be false in Server Mode")
 	}
 }
 
