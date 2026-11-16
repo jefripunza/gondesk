@@ -20,7 +20,6 @@ import (
 	"gondesk/internal/database"
 	"gondesk/internal/server"
 
-	"github.com/egoist/mygo"
 	"github.com/fasthttp/websocket"
 	"github.com/google/uuid"
 	"github.com/pion/stun/v3"
@@ -98,25 +97,35 @@ type Manager struct {
 	Node     *server.UnifiedNode
 	OnChange func()
 
-	mu             sync.Mutex
-	bridgeWS       *websocket.Conn
-	bridgeOnline   bool
-	turnReachable  bool
-	turnMappedAddr string
-	incoming       *IncomingPrompt
-	sessions       []*ActiveSession
-	screenEngine   *ScreenCaptureEngine
+	mu              sync.Mutex
+	bridgeWS        *websocket.Conn
+	bridgeOnline    bool
+	turnReachable   bool
+	turnMappedAddr  string
+	incoming        *IncomingPrompt
+	sessions        []*ActiveSession
+	screenEngine    *ScreenCaptureEngine
+	fileTransfers   map[string]*FileTransferState
+	customTargetDir string
 }
 
 // NewManager creates a new remote session manager.
 func NewManager(cfg *config.Config, store *database.Store, node *server.UnifiedNode, onChange func()) *Manager {
 	return &Manager{
-		Cfg:          cfg,
-		Store:        store,
-		Node:         node,
-		OnChange:     onChange,
-		screenEngine: NewScreenCaptureEngine(),
+		Cfg:           cfg,
+		Store:         store,
+		Node:          node,
+		OnChange:      onChange,
+		screenEngine:  NewScreenCaptureEngine(),
+		fileTransfers: make(map[string]*FileTransferState),
 	}
+}
+
+// SetCustomTargetDir overrides the destination folder for incoming file/folder pastes.
+func (m *Manager) SetCustomTargetDir(dir string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.customTargetDir = dir
 }
 
 // ScreenEngine returns the capture engine associated with the Manager.
@@ -310,17 +319,17 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 		m.mu.Unlock()
 		m.notify()
 
-	case "clipboard":
+	case "clipboard", "clipboard_paste":
 		m.mu.Lock()
 		for _, s := range m.sessions {
 			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
 				continue
 			}
-			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Remote clipboard received (%d chars): %s", msg.Timestamp, len(msg.Payload), msg.Payload))
+			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] Remote clipboard pasted (%d chars): %s", msg.Timestamp, len(msg.Payload), msg.Payload))
 		}
 		m.mu.Unlock()
-		if mygo.App.IsReady() && msg.Payload != "" {
-			mygo.Clipboard.WriteText(msg.Payload)
+		if msg.Payload != "" {
+			TriggerOSPasteText(msg.Payload)
 		}
 		m.notify()
 
@@ -336,6 +345,9 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 		}
 		m.mu.Unlock()
 		m.notify()
+
+	case "file_transfer_start", "file_transfer_chunk", "file_transfer_end", "file_transfer_progress", "file_transfer_cancel":
+		m.handleFileTransferSignal(msg)
 
 	case "frame":
 		rawBytes, err := base64.StdEncoding.DecodeString(msg.Payload)

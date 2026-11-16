@@ -2,6 +2,8 @@ package remote
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -487,5 +489,107 @@ func TestManagerFrameSignal(t *testing.T) {
 	}
 	if s.FrameSeq != 1 {
 		t.Fatalf("expected FrameSeq to be 1, got %d", s.FrameSeq)
+	}
+}
+
+func TestFileAndFolderPasteTransfer(t *testing.T) {
+	mgrB, _ := setupTestManager(t)
+	destDir := t.TempDir()
+	mgrB.SetCustomTargetDir(destDir)
+
+	// Create source folder with nested files on A
+	srcDir := t.TempDir()
+	projectFolder := filepath.Join(srcDir, "my-project")
+	subFolder := filepath.Join(projectFolder, "subfolder")
+	if err := os.MkdirAll(subFolder, 0o750); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	readmePath := filepath.Join(projectFolder, "README.md")
+	nestedPath := filepath.Join(subFolder, "config.json")
+	if err := os.WriteFile(readmePath, []byte("# My Project\nHello GonDesk"), 0o600); err != nil {
+		t.Fatalf("WriteFile readme: %v", err)
+	}
+	if err := os.WriteFile(nestedPath, []byte(`{"env":"production"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile nested: %v", err)
+	}
+
+	rootName, isFolder, entries, totalFiles, totalBytes, err := collectTransferEntries([]string{projectFolder})
+	if err != nil {
+		t.Fatalf("collectTransferEntries failed: %v", err)
+	}
+	if !isFolder || rootName != "my-project" || totalFiles != 2 {
+		t.Fatalf("unexpected entry summary: root=%q, isFolder=%v, totalFiles=%d", rootName, isFolder, totalFiles)
+	}
+
+	// Simulate file_transfer_start -> file_transfer_chunk -> file_transfer_end on Host B
+	transferID := "transfer-folder-test-001"
+	startBytes, _ := json.Marshal(fileTransferStartPayload{
+		TransferID: transferID,
+		RootName:   rootName,
+		IsFolder:   isFolder,
+		TotalFiles: totalFiles,
+		TotalBytes: totalBytes,
+	})
+	mgrB.HandleSignal(server.SignalMessage{
+		Type:        "file_transfer_start",
+		SessionUUID: "sess-folder-1",
+		FromDeskID:  "816 692 488",
+		FromAlias:   "MacBook-A",
+		Payload:     string(startBytes),
+	})
+
+	for _, entry := range entries {
+		var dataB64 string
+		if !entry.isDir {
+			raw, rErr := os.ReadFile(entry.absPath)
+			if rErr != nil {
+				t.Fatalf("ReadFile %s: %v", entry.absPath, rErr)
+			}
+			dataB64 = base64.StdEncoding.EncodeToString(raw)
+		}
+		chunkBytes, _ := json.Marshal(fileTransferChunkPayload{
+			TransferID:  transferID,
+			RelPath:     entry.relPath,
+			IsDir:       entry.isDir,
+			ChunkIndex:  0,
+			DataBase64:  dataB64,
+			IsLastChunk: true,
+		})
+		mgrB.HandleSignal(server.SignalMessage{
+			Type:        "file_transfer_chunk",
+			SessionUUID: "sess-folder-1",
+			FromDeskID:  "816 692 488",
+			Payload:     string(chunkBytes),
+		})
+	}
+
+	endBytes, _ := json.Marshal(fileTransferProgressPayload{
+		TransferID:       transferID,
+		TransferredBytes: totalBytes,
+		CompletedFiles:   totalFiles,
+		Status:           "completed",
+	})
+	mgrB.HandleSignal(server.SignalMessage{
+		Type:        "file_transfer_end",
+		SessionUUID: "sess-folder-1",
+		FromDeskID:  "816 692 488",
+		Payload:     string(endBytes),
+	})
+
+	// Verify files were pasted directly into destDir on Host B
+	// #nosec G304 -- reading test file in temporary directory
+	gotReadme, err := os.ReadFile(filepath.Join(destDir, "my-project", "README.md"))
+	if err != nil || string(gotReadme) != "# My Project\nHello GonDesk" {
+		t.Fatalf("expected README.md to be pasted in destDir, got %q (err: %v)", string(gotReadme), err)
+	}
+	// #nosec G304 -- reading test file in temporary directory
+	gotNested, err := os.ReadFile(filepath.Join(destDir, "my-project", "subfolder", "config.json"))
+	if err != nil || string(gotNested) != `{"env":"production"}` {
+		t.Fatalf("expected subfolder/config.json to be pasted in destDir, got %q (err: %v)", string(gotNested), err)
+	}
+
+	transfers := mgrB.FileTransfersSnapshot()
+	if len(transfers) != 1 || transfers[0].Status != "completed" || transfers[0].ProgressFraction() != 1.0 {
+		t.Fatalf("expected completed transfer state on Host B, got: %+v", transfers)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"image"
 	"image/jpeg"
 	"io"
 	"net"
@@ -180,5 +181,57 @@ func TestCaptureX11FromConn(t *testing.T) {
 
 	if img.Bounds().Dx() != 64 || img.Bounds().Dy() != 48 {
 		t.Fatalf("expected image 64x48, got %dx%d", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func TestIsBlankOrBlackImage(t *testing.T) {
+	// 1. All-black XWayland root window image should be detected as blank and rejected
+	blackImg := image.NewRGBA(image.Rect(0, 0, 320, 240))
+	for i := 0; i < len(blackImg.Pix); i += 4 {
+		blackImg.Pix[i] = 0
+		blackImg.Pix[i+1] = 0
+		blackImg.Pix[i+2] = 0
+		blackImg.Pix[i+3] = 255
+	}
+	if !IsBlankOrBlackImage(blackImg) {
+		t.Fatalf("expected all-black image to be detected as blank")
+	}
+
+	var blackBuf bytes.Buffer
+	_ = jpeg.Encode(&blackBuf, blackImg, &jpeg.Options{Quality: 65})
+	if _, err := processRawCapturedImage(blackBuf.Bytes()); err == nil {
+		t.Fatalf("expected processRawCapturedImage to reject all-black XWayland frame")
+	}
+
+	// 2. Non-black desktop frame should be accepted
+	validJPEG := GenerateSyntheticDesktopFrame(640, 360, DesktopInfo{HostAlias: "anjay"})
+	processed, err := processRawCapturedImage(validJPEG)
+	if err != nil || len(processed) == 0 {
+		t.Fatalf("expected valid desktop frame to be accepted, got err: %v", err)
+	}
+}
+
+func TestParseXAuthorityBytes(t *testing.T) {
+	var buf bytes.Buffer
+	writeChunk := func(b []byte) {
+		// #nosec G115 -- test chunk length is small
+		_ = binary.Write(&buf, binary.BigEndian, uint16(len(b)))
+		buf.Write(b)
+	}
+
+	// FamilyLocal (256)
+	_ = binary.Write(&buf, binary.BigEndian, uint16(256))
+	writeChunk([]byte("myhost"))
+	writeChunk([]byte("0"))
+	writeChunk([]byte("MIT-MAGIC-COOKIE-1"))
+	cookie := []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+	writeChunk(cookie)
+
+	name, gotCookie := parseXAuthorityBytes(buf.Bytes(), "0")
+	if name != "MIT-MAGIC-COOKIE-1" {
+		t.Fatalf("expected MIT-MAGIC-COOKIE-1, got %q", name)
+	}
+	if !bytes.Equal(gotCookie, cookie) {
+		t.Fatalf("cookie mismatch: got %v, want %v", gotCookie, cookie)
 	}
 }

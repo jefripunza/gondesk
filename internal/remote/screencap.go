@@ -115,7 +115,7 @@ func (e *ScreenCaptureEngine) CaptureFrame(info DesktopInfo) ([]byte, error) {
 }
 
 func (e *ScreenCaptureEngine) captureNative() ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 850*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 3000*time.Millisecond)
 	defer cancel()
 
 	targetFile := e.tmpFile
@@ -140,18 +140,30 @@ func (e *ScreenCaptureEngine) captureNative() ([]byte, error) {
 		}
 
 	case "linux":
-		// 1. Try pure-Go X11 socket capture (works on ANY X11/XWayland distro with 0 binaries/dependencies)
-		if x11Bytes, err := captureX11Screen(); err == nil && len(x11Bytes) > 0 {
-			return x11Bytes, nil
+		isWayland := strings.EqualFold(os.Getenv("XDG_SESSION_TYPE"), "wayland") || os.Getenv("WAYLAND_DISPLAY") != ""
+
+		// On native X11 sessions, try pure-Go X11 socket capture first
+		if !isWayland {
+			if x11Bytes, err := captureX11Screen(); err == nil && len(x11Bytes) > 0 {
+				return x11Bytes, nil
+			}
 		}
 
-		// 2. Try all available desktop environment tools (GNOME, KDE, XFCE, MATE, Cinnamon, Sway/Hyprland)
+		// Try all available desktop environment tools (GNOME Wayland/X11, KDE, Sway/Hyprland, XFCE, MATE, Cinnamon, X11)
 		cliBytes, err := e.captureLinuxCLI(ctx, targetFile)
-		if err != nil {
-			e.triggerLinuxAutoInstall()
-			return nil, err
+		if err == nil && len(cliBytes) > 0 {
+			return cliBytes, nil
 		}
-		return cliBytes, nil
+
+		// Fallback to X11 socket if Wayland CLI tools failed (e.g. X11 desktop with WAYLAND_DISPLAY leftover)
+		if isWayland {
+			if x11Bytes, xerr := captureX11Screen(); xerr == nil && len(x11Bytes) > 0 {
+				return x11Bytes, nil
+			}
+		}
+
+		e.triggerLinuxAutoInstall()
+		return nil, err
 
 	default:
 		return nil, fmt.Errorf("unsupported os for direct screencap: %s", runtime.GOOS)
@@ -172,18 +184,20 @@ func (e *ScreenCaptureEngine) captureLinuxCLI(ctx context.Context, targetFile st
 		bin  string
 		args []string
 	}{
-		// GNOME Shell D-Bus (Pre-installed on 100% of GNOME desktops: Ubuntu, Fedora, Debian, Pop!_OS)
-		{"gdbus", []string{"call", "--session", "--dest", "org.gnome.Shell.Screenshot", "--object-path", "/org/gnome/Shell/Screenshot", "--method", "org.gnome.Shell.Screenshot.Screenshot", "false", "false", targetFile}},
-		// KDE Plasma
+		// GNOME Official Screenshot utility (Whitelisted by GNOME Shell 41+ Wayland & X11 compositor)
+		{"gnome-screenshot", []string{"-f", targetFile}},
+		// KDE Plasma (Wayland & X11)
 		{"spectacle", []string{"-b", "-n", "-o", targetFile}},
+		// Wayland wlroots (Sway, Hyprland, Wayfire, River)
+		{"grim", []string{targetFile}},
+		// GNOME Shell D-Bus direct call
+		{"gdbus", []string{"call", "--session", "--dest", "org.gnome.Shell.Screenshot", "--object-path", "/org/gnome/Shell/Screenshot", "--method", "org.gnome.Shell.Screenshot.Screenshot", "false", "false", targetFile}},
 		// XFCE Desktop
 		{"xfce4-screenshooter", []string{"-f", "-s", targetFile}},
 		// MATE Desktop
 		{"mate-screenshot", []string{"-f", targetFile}},
 		// Cinnamon Desktop
 		{"cinnamon-screenshot", []string{"-f", targetFile}},
-		// Wayland wlroots (Sway, Hyprland, Wayfire, River)
-		{"grim", []string{targetFile}},
 		// Fast modern X11
 		{"maim", []string{"-f", "png", targetFile}},
 		// Standard X11
@@ -204,16 +218,18 @@ func (e *ScreenCaptureEngine) captureLinuxCLI(ctx context.Context, targetFile st
 			if err := cmd.Run(); err == nil {
 				// #nosec G304 -- reading internal temporary screen capture file
 				if raw, rerr := os.ReadFile(targetFile); rerr == nil && len(raw) > 0 {
-					return processRawCapturedImage(raw)
+					if processed, perr := processRawCapturedImage(raw); perr == nil && len(processed) > 0 {
+						return processed, nil
+					}
 				}
 			}
 		}
 	}
 
-	return nil, errors.New("no supported linux screen capture tool succeeded")
+	return nil, errors.New("no supported linux screen capture tool succeeded with non-blank frame")
 }
 
-// triggerLinuxAutoInstall attempts to install scrot or maim in the background via pkexec or package manager.
+// triggerLinuxAutoInstall attempts to install gnome-screenshot, scrot, and grim in the background via pkexec or package manager.
 func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 	if e.linuxAutoInstalled {
 		return
@@ -225,11 +241,11 @@ func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 			bin  string
 			args []string
 		}{
-			{"apt-get", []string{"install", "-y", "scrot"}},
-			{"dnf", []string{"install", "-y", "scrot"}},
-			{"pacman", []string{"-S", "--noconfirm", "scrot"}},
-			{"zypper", []string{"--non-interactive", "install", "scrot"}},
-			{"apk", []string{"add", "scrot"}},
+			{"apt-get", []string{"install", "-y", "gnome-screenshot", "scrot", "grim"}},
+			{"dnf", []string{"install", "-y", "gnome-screenshot", "scrot", "grim"}},
+			{"pacman", []string{"-S", "--noconfirm", "gnome-screenshot", "scrot", "grim"}},
+			{"zypper", []string{"--non-interactive", "install", "gnome-screenshot", "scrot", "grim"}},
+			{"apk", []string{"add", "scrot", "grim"}},
 		}
 
 		hasPkexec := false
@@ -241,10 +257,15 @@ func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 			if p, err := exec.LookPath(pm.bin); err == nil && p != "" {
 				var cmd *exec.Cmd
 				if hasPkexec {
-					// Use PolicyKit GUI authentication prompt standard on Linux desktops
-					args := append([]string{pm.bin}, pm.args...)
-					// #nosec G204 -- safe internal package installation invocation
-					cmd = exec.Command("pkexec", args...)
+					if pm.bin == "apt-get" {
+						// Single pkexec invocation that updates and installs Wayland + X11 screenshot tools
+						// #nosec G204 -- safe internal package installation invocation
+						cmd = exec.Command("pkexec", "sh", "-c", "apt-get update && apt-get install -y gnome-screenshot scrot grim || apt-get install -y gnome-screenshot scrot")
+					} else {
+						args := append([]string{pm.bin}, pm.args...)
+						// #nosec G204 -- safe internal package installation invocation
+						cmd = exec.Command("pkexec", args...)
+					}
 				} else {
 					// #nosec G204 -- safe internal package installation invocation
 					cmd = exec.Command(pm.bin, pm.args...)
@@ -288,17 +309,116 @@ func captureX11Screen() ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = conn.Close() }()
-	_ = conn.SetDeadline(time.Now().Add(750 * time.Millisecond))
+	_ = conn.SetDeadline(time.Now().Add(1500 * time.Millisecond))
 
-	return captureX11FromConn(conn)
+	authName, authCookie := readXAuthorityCookie(dispNum)
+	return captureX11FromConnWithAuth(conn, authName, authCookie)
+}
+
+// readXAuthorityCookie extracts MIT-MAGIC-COOKIE-1 from $XAUTHORITY or ~/.Xauthority for pure-Go X11 auth.
+func readXAuthorityCookie(dispNum string) (string, []byte) {
+	candidates := []string{}
+	if envAuth := os.Getenv("XAUTHORITY"); envAuth != "" {
+		candidates = append(candidates, envAuth)
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append(candidates, filepath.Join(home, ".Xauthority"))
+	}
+	uid := os.Getuid()
+	candidates = append(candidates,
+		fmt.Sprintf("/run/user/%d/gdm/Xauthority", uid),
+		fmt.Sprintf("/run/user/%d/.mutter-Xwaylandauth", uid),
+	)
+
+	for _, p := range candidates {
+		// #nosec G304 G703 -- reading local Xauthority file for X11 authentication
+		data, err := os.ReadFile(p)
+		if err != nil || len(data) < 12 {
+			continue
+		}
+		if name, cookie := parseXAuthorityBytes(data, dispNum); len(cookie) > 0 {
+			return name, cookie
+		}
+	}
+	return "", nil
+}
+
+func parseXAuthorityBytes(data []byte, dispNum string) (string, []byte) {
+	offset := 0
+	var fallbackName string
+	var fallbackCookie []byte
+
+	readChunk := func() ([]byte, bool) {
+		if offset+2 > len(data) {
+			return nil, false
+		}
+		length := int(binary.BigEndian.Uint16(data[offset : offset+2]))
+		offset += 2
+		if offset+length > len(data) {
+			return nil, false
+		}
+		chunk := data[offset : offset+length]
+		offset += length
+		return chunk, true
+	}
+
+	for offset+2 <= len(data) {
+		offset += 2 // skip family uint16
+		if _, ok := readChunk(); !ok {
+			break
+		}
+		numBytes, ok := readChunk()
+		if !ok {
+			break
+		}
+		nameBytes, ok := readChunk()
+		if !ok {
+			break
+		}
+		cookieBytes, ok := readChunk()
+		if !ok {
+			break
+		}
+		nameStr := string(nameBytes)
+		if nameStr == "MIT-MAGIC-COOKIE-1" && len(cookieBytes) > 0 {
+			if string(numBytes) == dispNum || len(numBytes) == 0 {
+				return nameStr, cookieBytes
+			}
+			if len(fallbackCookie) == 0 {
+				fallbackName = nameStr
+				fallbackCookie = cookieBytes
+			}
+		}
+	}
+	return fallbackName, fallbackCookie
 }
 
 func captureX11FromConn(conn net.Conn) ([]byte, error) {
+	return captureX11FromConnWithAuth(conn, "", nil)
+}
+
+func captureX11FromConnWithAuth(conn net.Conn, authName string, authCookie []byte) ([]byte, error) {
 	// X11 Connection Setup (little-endian 'l')
-	setupReq := make([]byte, 12)
+	pad4 := func(n int) int { return (n + 3) &^ 3 }
+	nameLen := len(authName)
+	dataLen := len(authCookie)
+	totalSetupLen := 12 + pad4(nameLen) + pad4(dataLen)
+
+	setupReq := make([]byte, totalSetupLen)
 	setupReq[0] = 'l'
 	binary.LittleEndian.PutUint16(setupReq[2:4], 11) // major 11
 	binary.LittleEndian.PutUint16(setupReq[4:6], 0)  // minor 0
+	// #nosec G115 -- X11 auth name length is bounded
+	binary.LittleEndian.PutUint16(setupReq[6:8], uint16(nameLen))
+	// #nosec G115 -- X11 auth cookie length is bounded
+	binary.LittleEndian.PutUint16(setupReq[8:10], uint16(dataLen))
+	if nameLen > 0 {
+		copy(setupReq[12:12+nameLen], authName)
+	}
+	if dataLen > 0 {
+		offset := 12 + pad4(nameLen)
+		copy(setupReq[offset:offset+dataLen], authCookie)
+	}
 
 	if _, err := conn.Write(setupReq); err != nil {
 		return nil, err
@@ -382,6 +502,11 @@ func captureX11FromConn(conn net.Conn) ([]byte, error) {
 		img.Pix[i+3] = 255             // A
 	}
 
+	// Reject blank/all-black XWayland root windows so Wayland capture tools are used instead
+	if IsBlankOrBlackImage(img) {
+		return nil, errors.New("X11 captured frame is blank/all-black (XWayland root window)")
+	}
+
 	// Downscale if wider than 1280px
 	targetW := scrW
 	targetH := scrH
@@ -406,14 +531,49 @@ func captureX11FromConn(conn net.Conn) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// IsBlankOrBlackImage checks whether an image is >=99.5% solid black (e.g., XWayland uncomposited root window).
+func IsBlankOrBlackImage(img image.Image) bool {
+	if img == nil {
+		return true
+	}
+	b := img.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	if w <= 0 || h <= 0 {
+		return true
+	}
+
+	stepX := max(w/40, 1)
+	stepY := max(h/40, 1)
+
+	totalSamples := 0
+	nonBlackSamples := 0
+
+	for y := b.Min.Y; y < b.Max.Y; y += stepY {
+		for x := b.Min.X; x < b.Max.X; x += stepX {
+			totalSamples++
+			r, g, bl, _ := img.At(x, y).RGBA()
+			if (r>>8) > 8 || (g>>8) > 8 || (bl>>8) > 8 {
+				nonBlackSamples++
+			}
+		}
+	}
+
+	if totalSamples == 0 {
+		return true
+	}
+	return float64(nonBlackSamples)/float64(totalSamples) < 0.005
+}
+
 func processRawCapturedImage(rawBytes []byte) ([]byte, error) {
-	// Attempt decoding to verify and optionally downscale
+	// Attempt decoding to verify non-blank content and optionally downscale
 	img, format, err := image.Decode(bytes.NewReader(rawBytes))
 	if err != nil {
-		if len(rawBytes) > 2 && rawBytes[0] == 0xFF && rawBytes[1] == 0xD8 {
-			return rawBytes, nil
-		}
 		return nil, err
+	}
+
+	if IsBlankOrBlackImage(img) {
+		return nil, errors.New("captured frame is blank/all-black (likely XWayland root window)")
 	}
 
 	bounds := img.Bounds()
@@ -530,7 +690,7 @@ func GenerateSyntheticDesktopFrame(w, h int, info DesktopInfo) []byte {
 
 	// Helpful diagnostic notice on host setup
 	drawText(img, cardX+30, cardY+165, "Notice: Native desktop screen capture fallback active.", yellow)
-	drawText(img, cardX+30, cardY+185, "If screen is dark, install screencap on host: sudo apt install scrot", muted)
+	drawText(img, cardX+30, cardY+185, "If screen is dark, install on host: sudo apt install gnome-screenshot scrot", muted)
 
 	// Bottom taskbar texts
 	drawText(img, 20, h-16, "Start", coral)

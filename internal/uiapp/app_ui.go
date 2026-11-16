@@ -79,6 +79,9 @@ type AppUI struct {
 
 	// Host desktop shadow cursor overlay window for incoming remote sessions
 	HostOverlayWin *mygo.Window
+
+	// Dedicated file/folder paste status windows tracked by TransferID
+	PasteWindows map[string]*mygo.Window
 }
 
 // NewAppUI initializes the UI state from SQLite and Configuration.
@@ -90,6 +93,7 @@ func NewAppUI(cfg *config.Config, store *database.Store, node *server.UnifiedNod
 		Manager:         mgr,
 		SettingsSection: "general",
 		ActiveWindows:   make(map[string]*ActiveSessionWindow),
+		PasteWindows:    make(map[string]*mygo.Window),
 	}
 	a.ReloadFromDB()
 	return a
@@ -142,8 +146,11 @@ func (a *AppUI) NotifyChanged() {
 		a.Win.Update(func() {
 			a.ReloadFromDB()
 			a.UpdateHostOverlay()
+			a.UpdateFilePasteWindows()
 			a.checkWindowsScreenCaptureDialog()
 		})
+	} else {
+		a.UpdateFilePasteWindows()
 	}
 }
 

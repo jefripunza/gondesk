@@ -2,8 +2,6 @@ package uiapp
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -90,6 +88,11 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 		}
 	}
 
+	// Handle direct Ctrl+V / Cmd+V paste inside the remote window (text or files/folders)
+	if (c.Shortcut(ui.Cmd, ui.KeyV) || c.Shortcut(ui.Ctrl, ui.KeyV)) && !c.ShortcutRepeated() {
+		a.TriggerRemotePaste(c, sw)
+	}
+
 	ui.Column(c.Key("connected-remote-col")).Fill().Background(ui.Hex("#08080C")).Children(func() {
 		// Top floating poni / notch panel
 		ui.Row(c.Key("top-poni-row")).FillWidth().Padding(6, 12).Justify(ui.Center).Children(func() {
@@ -120,45 +123,6 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 					}
 					ui.Text(c, label).FontSize(13).Bold().TextColor(ui.Hex("#F8FAFC"))
 
-					// Send Clipboard action
-					if ui.Button(c.Key("btn-send-clipboard"), "📋 Send Clipboard").
-						Tooltip("Kirim isi clipboard lokal ke host remote").Clicked() {
-						txt := ""
-						if mygo.App.IsReady() {
-							txt = mygo.Clipboard.ReadText()
-						}
-						if txt == "" {
-							txt = "Clipboard from " + a.DeskID
-						}
-						if a.Manager != nil && sw.SessionUUID != "" {
-							a.Manager.SendClipboard(sw.SessionUUID, txt)
-						}
-						c.Toast("Clipboard sent to remote desk")
-					}
-
-					// Send File action
-					if ui.Button(c.Key("btn-send-file"), "📁 Send File").
-						Tooltip("Pilih dan kirim file ke host remote").Clicked() {
-						go func() {
-							paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-								Title: "Pilih file untuk dikirim ke remote desk",
-							})
-							if err == nil && len(paths) > 0 {
-								filePath := paths[0]
-								// #nosec G304 -- user explicitly selected file via native system file picker
-								data, rErr := os.ReadFile(filePath)
-								if rErr == nil && a.Manager != nil && sw.SessionUUID != "" {
-									fileName := filepath.Base(filePath)
-									a.Manager.SendFile(sw.SessionUUID, fileName, data)
-									sw.FileStatus = fmt.Sprintf("File %s (%d bytes) terkirim", fileName, len(data))
-									if sw.Win != nil {
-										sw.Win.Invalidate()
-									}
-								}
-							}
-						}()
-					}
-
 					// Disconnect button
 					ui.PrimaryButton(c.Key("btn-poni-disconnect"), "Disconnect").OnClick(func() {
 						a.DisconnectDesk(c, sw.DeskID)
@@ -186,10 +150,25 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 		// Remote Stream Canvas Viewport with collaborative multi-cursor
 		canvas := ui.Box(c.Key("remote-canvas")).Fill().Margin(8).Radius(8).
 			Background(ui.Hex("#040407")).Border(1, ui.Hex("#1C1C28")).
-			Cursor(ui.CursorCrosshair)
+			Cursor(ui.CursorCrosshair).Focusable().AutoFocus()
 
-		// Capture mouse movements and clicks to send to remote host
+		// Also support dropping files/folders onto the remote canvas to paste to target
+		if dropped := canvas.DroppedFiles(); len(dropped) > 0 && a.Manager != nil && sw.SessionUUID != "" {
+			if ft, err := a.Manager.StartPasteFiles(sw.SessionUUID, dropped); err == nil {
+				a.OpenFilePasteWindow(ft.TransferID)
+			}
+		}
+
+		// Capture mouse movements, clicks, and keyboard shortcuts to send to remote host
 		canvas.HandleInput(func(ev ui.InputEvent) bool {
+			if ev.Kind == ui.InputKeyDown {
+				if ev.Key == ui.KeyV && (ev.Mods&ui.Cmd != 0 || ev.Mods&ui.Ctrl != 0) && !ev.Repeat {
+					a.TriggerRemotePaste(c, sw)
+					return true
+				}
+				return false
+			}
+
 			if a.Manager != nil && sw.SessionUUID != "" {
 				cw := sw.CanvasW
 				if cw <= 1.0 {
@@ -217,19 +196,22 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 					if sw.Win != nil {
 						sw.Win.Invalidate()
 					}
+					return true
 				case ui.InputPointerDown:
 					a.Manager.SendMouseClick(sw.SessionUUID, normX, normY, ev.Button)
 					if sw.Win != nil {
 						sw.Win.Invalidate()
 					}
+					return true
 				case ui.InputPointerUp:
 					a.Manager.SendMouseUp(sw.SessionUUID, normX, normY, ev.Button)
 					if sw.Win != nil {
 						sw.Win.Invalidate()
 					}
+					return true
 				}
 			}
-			return true
+			return false
 		})
 
 		// Draw stream canvas and all active collaborative remote cursors (N participants)

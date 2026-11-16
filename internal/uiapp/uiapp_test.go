@@ -1,6 +1,7 @@
 package uiapp
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -213,25 +214,22 @@ func TestRenderRemoteWindowViews(t *testing.T) {
 		appUI.RenderRemoteWindow(c, norm)
 	}, 1024, 640)
 
-	// Verify Top Poni Notch elements
+	// Verify Top Poni Notch elements (Send Clipboard and Send File buttons must be removed)
 	if !ttConnected.HasText("CONNECTED") {
 		t.Fatalf("expected 'CONNECTED' badge in poni toolbar")
 	}
 	if !ttConnected.HasText("⠿") {
 		t.Fatalf("expected draggable grip '⠿' in poni toolbar")
 	}
-	if !ttConnected.HasText("📋 Send Clipboard") {
-		t.Fatalf("expected '📋 Send Clipboard' in poni toolbar")
+	if ttConnected.HasText("📋 Send Clipboard") {
+		t.Fatalf("expected '📋 Send Clipboard' button to be removed from poni toolbar")
 	}
-	if !ttConnected.HasText("📁 Send File") {
-		t.Fatalf("expected '📁 Send File' in poni toolbar")
+	if ttConnected.HasText("📁 Send File") {
+		t.Fatalf("expected '📁 Send File' button to be removed from poni toolbar")
 	}
 	if !ttConnected.HasText("Disconnect") {
 		t.Fatalf("expected 'Disconnect' in poni toolbar")
 	}
-
-	// Click Send Clipboard
-	_ = ttConnected.Click("📋 Send Clipboard")
 
 	// Test grip horizontal dragging
 	initialOffset := sw.NotchOffsetX
@@ -423,5 +421,36 @@ func TestClickRippleExpiration(t *testing.T) {
 	}
 	if isRippleActive(mouseUp) {
 		t.Fatalf("expected ripple to be immediately inactive on mouse up")
+	}
+}
+
+func TestRenderFilePasteWindow(t *testing.T) {
+	appUI, _ := setupTestAppUI(t)
+
+	sess, err := appUI.Manager.ConnectToPeer("170 095 453", "")
+	if err != nil {
+		t.Fatalf("ConnectToPeer: %v", err)
+	}
+
+	tmpSrc := t.TempDir()
+	sampleFile := filepath.Join(tmpSrc, "dokumen_penting.txt")
+	if err := os.WriteFile(sampleFile, []byte("Isi dokumen penting 12345"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ft, err := appUI.Manager.StartPasteFiles(sess.SessionUUID, []string{sampleFile})
+	if err != nil {
+		t.Fatalf("StartPasteFiles: %v", err)
+	}
+
+	ttPaste := ui.NewTester(func(c *ui.Context) {
+		appUI.RenderFilePasteWindow(c, ft.TransferID)
+	}, 520, 340)
+
+	if !ttPaste.HasText("dokumen_penting.txt") {
+		t.Fatalf("expected file name 'dokumen_penting.txt' in paste window, got: %v", ttPaste.Texts())
+	}
+	if !ttPaste.HasText("Folder Tujuan:") {
+		t.Fatalf("expected 'Folder Tujuan:' label in paste window, got: %v", ttPaste.Texts())
 	}
 }
