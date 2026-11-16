@@ -87,6 +87,9 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 			}
 		}
 	}
+	if activeSess != nil && sw.SessionUUID == "" {
+		sw.SessionUUID = activeSess.SessionUUID
+	}
 
 	// Handle direct Ctrl+V / Cmd+V paste inside the remote window (text or files/folders)
 	if (c.Shortcut(ui.Cmd, ui.KeyV) || c.Shortcut(ui.Ctrl, ui.KeyV)) && !c.ShortcutRepeated() {
@@ -266,7 +269,7 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 					p.StrokePath(arrow, 1, ui.Hex("#FFFFFF"))
 
 					// If not self, draw participant alias / ID tag badge (self only has the clean arrow)
-					isSelf := (st.DeskID != "" && cur.DeskID == st.DeskID)
+					isSelf := st.DeskID != "" && (cur.DeskID == st.DeskID || database.NormalizeDeskID(cur.DeskID) == database.NormalizeDeskID(st.DeskID))
 					if !isSelf {
 						tag := cur.Alias
 						if tag == "" {

@@ -38,14 +38,15 @@ type DesktopInfo struct {
 
 // ScreenCaptureEngine coordinates OS-native screen captures with synthetic fallback.
 type ScreenCaptureEngine struct {
-	mu                  sync.Mutex
-	customCap           func() ([]byte, error)
-	tmpFile             string
-	frameCounter        uint64
-	lastErrLog          time.Time
-	linuxAutoInstalled  bool
-	needsWindowsPrompt  bool
-	windowsDialogShown  bool
+	mu                 sync.Mutex
+	customCap          func() ([]byte, error)
+	tmpFile            string
+	frameCounter       uint64
+	lastErrLog         time.Time
+	linuxAutoInstalled bool
+	needsWindowsPrompt bool
+	windowsDialogShown bool
+	streamCmdWriter    io.WriteCloser
 }
 
 // NewScreenCaptureEngine initializes the capture engine.
@@ -77,6 +78,15 @@ func (e *ScreenCaptureEngine) SetWindowsDialogShown() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.windowsDialogShown = true
+}
+
+// SendLinuxStreamCommand delivers an OS command (e.g. mouse move/button) to the Linux compositor pipe if active.
+func (e *ScreenCaptureEngine) SendLinuxStreamCommand(cmd string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.streamCmdWriter != nil {
+		_, _ = io.WriteString(e.streamCmdWriter, cmd)
+	}
 }
 
 // CaptureFrame captures a single desktop frame across any Linux, macOS, or Windows environment,
@@ -178,36 +188,28 @@ func (e *ScreenCaptureEngine) captureNative() ([]byte, error) {
 	return processRawCapturedImage(rawBytes)
 }
 
-// captureLinuxCLI attempts capture across GNOME, KDE, XFCE, MATE, Cinnamon, wlroots, and X11 tools.
+// captureLinuxCLI attempts capture across silent Wayland & X11 tools without flash animations or camera shutter sounds.
 func (e *ScreenCaptureEngine) captureLinuxCLI(ctx context.Context, targetFile string) ([]byte, error) {
 	candidates := []struct {
 		bin  string
 		args []string
 	}{
-		// GNOME Official Screenshot utility (Whitelisted by GNOME Shell 41+ Wayland & X11 compositor)
-		{"gnome-screenshot", []string{"-f", targetFile}},
-		// KDE Plasma (Wayland & X11)
-		{"spectacle", []string{"-b", "-n", "-o", targetFile}},
-		// Wayland wlroots (Sway, Hyprland, Wayfire, River)
+		// 1. GStreamer with PipeWire (Used by AnyDesk & RustDesk on GNOME/KDE Wayland & X11, completely silent without flash or shutter sound)
+		{"gst-launch-1.0", []string{"pipewiresrc", "num-buffers=1", "!", "videoconvert", "!", "jpegenc", "quality=60", "!", "filesink", "location=" + targetFile}},
+		// 2. Wayland wlroots (Sway, Hyprland, Wayfire, River - completely silent)
 		{"grim", []string{targetFile}},
-		// GNOME Shell D-Bus direct call
-		{"gdbus", []string{"call", "--session", "--dest", "org.gnome.Shell.Screenshot", "--object-path", "/org/gnome/Shell/Screenshot", "--method", "org.gnome.Shell.Screenshot.Screenshot", "false", "false", targetFile}},
-		// XFCE Desktop
-		{"xfce4-screenshooter", []string{"-f", "-s", targetFile}},
-		// MATE Desktop
-		{"mate-screenshot", []string{"-f", targetFile}},
-		// Cinnamon Desktop
-		{"cinnamon-screenshot", []string{"-f", targetFile}},
-		// Fast modern X11
+		// 3. Fast modern X11 (maim is silent)
 		{"maim", []string{"-f", "png", targetFile}},
-		// Standard X11
+		// 4. Standard X11 (scrot with -z = silent flag, no beep or shutter sound)
 		{"scrot", []string{"-o", "-z", "-q", "60", targetFile}},
-		// ImageMagick
-		{"import", []string{"-window", "root", "-quality", "60", targetFile}},
-		// Standard X11 xwd
+		// 5. GStreamer ximagesrc (silent X11)
+		{"gst-launch-1.0", []string{"ximagesrc", "num-buffers=1", "!", "videoconvert", "!", "jpegenc", "quality=60", "!", "filesink", "location=" + targetFile}},
+		// 6. Standard X11 xwd with -silent flag
 		{"xwd", []string{"-root", "-silent", "-out", targetFile}},
-		// FFmpeg x11grab
-		{"ffmpeg", []string{"-f", "x11grab", "-i", os.Getenv("DISPLAY"), "-vframes", "1", "-q:v", "3", "-y", targetFile}},
+		// 7. FFmpeg x11grab (silent)
+		{"ffmpeg", []string{"-nostats", "-loglevel", "0", "-f", "x11grab", "-i", os.Getenv("DISPLAY"), "-vframes", "1", "-q:v", "3", "-y", targetFile}},
+		// 8. ImageMagick import
+		{"import", []string{"-window", "root", "-quality", "60", targetFile}},
 	}
 
 	for _, cand := range candidates {
@@ -229,7 +231,7 @@ func (e *ScreenCaptureEngine) captureLinuxCLI(ctx context.Context, targetFile st
 	return nil, errors.New("no supported linux screen capture tool succeeded with non-blank frame")
 }
 
-// triggerLinuxAutoInstall attempts to install gnome-screenshot, scrot, and grim in the background via pkexec or package manager.
+// triggerLinuxAutoInstall attempts to install pipewire/gstreamer, scrot, grim, and maim in the background via pkexec or package manager.
 func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 	if e.linuxAutoInstalled {
 		return
@@ -241,10 +243,10 @@ func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 			bin  string
 			args []string
 		}{
-			{"apt-get", []string{"install", "-y", "gnome-screenshot", "scrot", "grim"}},
-			{"dnf", []string{"install", "-y", "gnome-screenshot", "scrot", "grim"}},
-			{"pacman", []string{"-S", "--noconfirm", "gnome-screenshot", "scrot", "grim"}},
-			{"zypper", []string{"--non-interactive", "install", "gnome-screenshot", "scrot", "grim"}},
+			{"apt-get", []string{"install", "-y", "gstreamer1.0-pipewire", "gstreamer1.0-tools", "scrot", "grim", "maim"}},
+			{"dnf", []string{"install", "-y", "pipewire-gstreamer", "gstreamer1-plugins-base-tools", "scrot", "grim", "maim"}},
+			{"pacman", []string{"-S", "--noconfirm", "gst-plugin-pipewire", "scrot", "grim", "maim"}},
+			{"zypper", []string{"--non-interactive", "install", "gstreamer-plugin-pipewire", "scrot", "grim", "maim"}},
 			{"apk", []string{"add", "scrot", "grim"}},
 		}
 
@@ -258,9 +260,9 @@ func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 				var cmd *exec.Cmd
 				if hasPkexec {
 					if pm.bin == "apt-get" {
-						// Single pkexec invocation that updates and installs Wayland + X11 screenshot tools
+						// Single pkexec invocation that updates and installs silent screen capture tools
 						// #nosec G204 -- safe internal package installation invocation
-						cmd = exec.Command("pkexec", "sh", "-c", "apt-get update && apt-get install -y gnome-screenshot scrot grim || apt-get install -y gnome-screenshot scrot")
+						cmd = exec.Command("pkexec", "sh", "-c", "apt-get update && apt-get install -y gstreamer1.0-pipewire gstreamer1.0-tools scrot grim maim || apt-get install -y scrot maim")
 					} else {
 						args := append([]string{pm.bin}, pm.args...)
 						// #nosec G204 -- safe internal package installation invocation
@@ -277,8 +279,8 @@ func (e *ScreenCaptureEngine) triggerLinuxAutoInstall() {
 	}()
 }
 
-// captureX11Screen performs pure-Go X11 socket communication on /tmp/.X11-unix/X0.
-func captureX11Screen() ([]byte, error) {
+// resolveX11DisplayNum extracts the X11 display number (e.g. "0" from ":0" or ":0.0").
+func resolveX11DisplayNum() string {
 	displayStr := os.Getenv("DISPLAY")
 	if displayStr == "" {
 		displayStr = ":0"
@@ -301,7 +303,12 @@ func captureX11Screen() ([]byte, error) {
 			dispNum = part
 		}
 	}
+	return dispNum
+}
 
+// captureX11Screen performs pure-Go X11 socket communication on /tmp/.X11-unix/X0.
+func captureX11Screen() ([]byte, error) {
+	dispNum := resolveX11DisplayNum()
 	socketPath := "/tmp/.X11-unix/X" + dispNum
 	// #nosec G704 -- safe internal local unix domain socket for X11 screen capture
 	conn, err := net.DialTimeout("unix", socketPath, 350*time.Millisecond)
@@ -329,6 +336,14 @@ func readXAuthorityCookie(dispNum string) (string, []byte) {
 		fmt.Sprintf("/run/user/%d/gdm/Xauthority", uid),
 		fmt.Sprintf("/run/user/%d/.mutter-Xwaylandauth", uid),
 	)
+
+	// Also check dynamic Mutter Xwayland auth files (e.g. /run/user/<uid>/.mutter-Xwaylandauth*)
+	if matches, err := filepath.Glob(fmt.Sprintf("/run/user/%d/.mutter-Xwaylandauth*", uid)); err == nil {
+		candidates = append(candidates, matches...)
+	}
+	if matches, err := filepath.Glob(fmt.Sprintf("/run/user/%d/*Xauthority*", uid)); err == nil {
+		candidates = append(candidates, matches...)
+	}
 
 	for _, p := range candidates {
 		// #nosec G304 G703 -- reading local Xauthority file for X11 authentication

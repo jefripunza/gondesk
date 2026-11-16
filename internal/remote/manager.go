@@ -98,6 +98,7 @@ type Manager struct {
 	OnChange func()
 
 	mu              sync.Mutex
+	wsWriteMu       sync.Mutex
 	bridgeWS        *websocket.Conn
 	bridgeOnline    bool
 	turnReachable   bool
@@ -105,20 +106,67 @@ type Manager struct {
 	incoming        *IncomingPrompt
 	sessions        []*ActiveSession
 	screenEngine    *ScreenCaptureEngine
+	inputEngine     *InputControlEngine
 	fileTransfers   map[string]*FileTransferState
 	customTargetDir string
+
+	settingsMu         sync.RWMutex
+	cachedDeskID       string
+	cachedAlias        string
+	cachedAllowControl bool
 }
 
 // NewManager creates a new remote session manager.
 func NewManager(cfg *config.Config, store *database.Store, node *server.UnifiedNode, onChange func()) *Manager {
-	return &Manager{
+	screenEngine := NewScreenCaptureEngine()
+	m := &Manager{
 		Cfg:           cfg,
 		Store:         store,
 		Node:          node,
 		OnChange:      onChange,
-		screenEngine:  NewScreenCaptureEngine(),
+		screenEngine:  screenEngine,
+		inputEngine:   NewInputControlEngine(screenEngine),
 		fileTransfers: make(map[string]*FileTransferState),
 	}
+	m.RefreshSettingsCache()
+	return m
+}
+
+// InputEngine returns the OS input controller associated with the Manager.
+func (m *Manager) InputEngine() *InputControlEngine {
+	return m.inputEngine
+}
+
+// RefreshSettingsCache updates cached settings to avoid database queries during high-frequency mouse streaming.
+func (m *Manager) RefreshSettingsCache() {
+	if m.Store == nil {
+		return
+	}
+	if st, err := m.Store.GetSettings(); err == nil {
+		m.settingsMu.Lock()
+		m.cachedDeskID = st.DeskID
+		m.cachedAlias = st.Alias
+		m.cachedAllowControl = st.AllowControl
+		m.settingsMu.Unlock()
+	}
+}
+
+func (m *Manager) getCachedSettings() (deskID, alias string, allowControl bool) {
+	m.settingsMu.RLock()
+	deskID = m.cachedDeskID
+	alias = m.cachedAlias
+	allowControl = m.cachedAllowControl
+	m.settingsMu.RUnlock()
+
+	if deskID == "" && m.Store != nil {
+		m.RefreshSettingsCache()
+		m.settingsMu.RLock()
+		deskID = m.cachedDeskID
+		alias = m.cachedAlias
+		allowControl = m.cachedAllowControl
+		m.settingsMu.RUnlock()
+	}
+	return
 }
 
 // SetCustomTargetDir overrides the destination folder for incoming file/folder pastes.
@@ -354,7 +402,7 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 		if err == nil && len(rawBytes) > 0 {
 			m.mu.Lock()
 			for _, s := range m.sessions {
-				if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+				if s.SessionUUID != msg.SessionUUID && database.NormalizeDeskID(s.PeerDeskID) != database.NormalizeDeskID(msg.FromDeskID) {
 					continue
 				}
 				s.LatestFrame = rawBytes
@@ -382,7 +430,7 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+			if s.SessionUUID != msg.SessionUUID && database.NormalizeDeskID(s.PeerDeskID) != database.NormalizeDeskID(msg.FromDeskID) {
 				continue
 			}
 			if s.Participants == nil {
@@ -426,12 +474,26 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 			}
 		}
 		m.mu.Unlock()
+
+		// Inject real OS mouse movement and clicks on the host system when control is allowed
+		_, _, allowControl := m.getCachedSettings()
+		if allowControl && m.inputEngine != nil {
+			switch msg.Type {
+			case "mouse_move":
+				m.inputEngine.MoveMouse(ev.NormX, ev.NormY)
+			case "mouse_click":
+				m.inputEngine.MouseButton(ev.NormX, ev.NormY, ev.Button, true)
+			case "mouse_up":
+				m.inputEngine.MouseButton(ev.NormX, ev.NormY, ev.Button, false)
+			}
+		}
+
 		m.notify()
 
 	case "chat":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+			if s.SessionUUID != msg.SessionUUID && database.NormalizeDeskID(s.PeerDeskID) != database.NormalizeDeskID(msg.FromDeskID) {
 				continue
 			}
 			s.ChatLog = append(s.ChatLog, fmt.Sprintf("[%s] %s: %s", msg.Timestamp, msg.FromDeskID, msg.Payload))
@@ -442,7 +504,7 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 	case "input":
 		m.mu.Lock()
 		for _, s := range m.sessions {
-			if s.SessionUUID != msg.SessionUUID && s.PeerDeskID != msg.FromDeskID {
+			if s.SessionUUID != msg.SessionUUID && database.NormalizeDeskID(s.PeerDeskID) != database.NormalizeDeskID(msg.FromDeskID) {
 				continue
 			}
 			s.LastInput = msg.Payload
@@ -488,7 +550,9 @@ func (m *Manager) sendSessionSignal(sessionUUID string, msg server.SignalMessage
 
 	// 1. Send via direct session WebSocket if active (Outgoing P2P client to host)
 	if directWS != nil {
+		m.wsWriteMu.Lock()
 		_ = directWS.WriteJSON(msg)
+		m.wsWriteMu.Unlock()
 		return
 	}
 
@@ -499,7 +563,9 @@ func (m *Manager) sendSessionSignal(sessionUUID string, msg server.SignalMessage
 
 	// 3. Fallback to Global Bridge WebSocket
 	if bridgeWS != nil {
+		m.wsWriteMu.Lock()
 		_ = bridgeWS.WriteJSON(msg)
+		m.wsWriteMu.Unlock()
 	}
 }
 
@@ -511,7 +577,9 @@ func (m *Manager) sendReplySignal(msg server.SignalMessage) {
 	ws := m.bridgeWS
 	m.mu.Unlock()
 	if ws != nil {
+		m.wsWriteMu.Lock()
 		_ = ws.WriteJSON(msg)
+		m.wsWriteMu.Unlock()
 	}
 }
 
@@ -1000,7 +1068,7 @@ func (m *Manager) SendFile(sessionUUID, filename string, data []byte) {
 
 // SendMouseMove broadcasts a normalized mouse move event for multi-cursor collaboration.
 func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
-	st, _ := m.Store.GetSettings()
+	deskID, alias, _ := m.getCachedSettings()
 	m.mu.Lock()
 	var peerID string
 	for _, s := range m.sessions {
@@ -1011,14 +1079,14 @@ func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
 		if s.Participants == nil {
 			s.Participants = make(map[string]*RemoteCursor)
 		}
-		cur, ok := s.Participants[st.DeskID]
+		cur, ok := s.Participants[deskID]
 		if !ok {
 			cur = &RemoteCursor{
-				DeskID: st.DeskID,
-				Alias:  st.Alias,
+				DeskID: deskID,
+				Alias:  alias,
 				Color:  GetCursorColor(len(s.Participants)),
 			}
-			s.Participants[st.DeskID] = cur
+			s.Participants[deskID] = cur
 		}
 		cur.NormX = normX
 		cur.NormY = normY
@@ -1031,13 +1099,13 @@ func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
 		payload, _ := json.Marshal(map[string]any{
 			"norm_x": normX,
 			"norm_y": normY,
-			"alias":  st.Alias,
+			"alias":  alias,
 		})
 		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "mouse_move",
 			SessionUUID: sessionUUID,
-			FromDeskID:  st.DeskID,
-			FromAlias:   st.Alias,
+			FromDeskID:  deskID,
+			FromAlias:   alias,
 			ToDeskID:    peerID,
 			Payload:     string(payload),
 			Timestamp:   time.Now().Format("15:04:05"),
@@ -1048,7 +1116,7 @@ func (m *Manager) SendMouseMove(sessionUUID string, normX, normY float32) {
 
 // SendMouseClick broadcasts a normalized mouse click event for multi-cursor collaboration.
 func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, button int) {
-	st, _ := m.Store.GetSettings()
+	deskID, alias, _ := m.getCachedSettings()
 	m.mu.Lock()
 	var peerID string
 	for _, s := range m.sessions {
@@ -1059,20 +1127,20 @@ func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, butto
 		if s.Participants == nil {
 			s.Participants = make(map[string]*RemoteCursor)
 		}
-		cur, ok := s.Participants[st.DeskID]
+		cur, ok := s.Participants[deskID]
 		if !ok {
 			cur = &RemoteCursor{
-				DeskID: st.DeskID,
-				Alias:  st.Alias,
+				DeskID: deskID,
+				Alias:  alias,
 				Color:  GetCursorColor(len(s.Participants)),
 			}
-			s.Participants[st.DeskID] = cur
+			s.Participants[deskID] = cur
 		}
 		cur.NormX = normX
 		cur.NormY = normY
 		cur.LastAction = "click"
 		cur.UpdatedAt = time.Now()
-		s.LastInput = fmt.Sprintf("Click (%s at %.2f, %.2f)", st.Alias, normX, normY)
+		s.LastInput = fmt.Sprintf("Click (%s at %.2f, %.2f)", alias, normX, normY)
 		s.FrameTick++
 	}
 	m.mu.Unlock()
@@ -1082,13 +1150,13 @@ func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, butto
 			"norm_x": normX,
 			"norm_y": normY,
 			"button": button,
-			"alias":  st.Alias,
+			"alias":  alias,
 		})
 		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "mouse_click",
 			SessionUUID: sessionUUID,
-			FromDeskID:  st.DeskID,
-			FromAlias:   st.Alias,
+			FromDeskID:  deskID,
+			FromAlias:   alias,
 			ToDeskID:    peerID,
 			Payload:     string(payload),
 			Timestamp:   time.Now().Format("15:04:05"),
@@ -1099,7 +1167,7 @@ func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, butto
 
 // SendMouseUp broadcasts a normalized mouse button release event to clear click ripple.
 func (m *Manager) SendMouseUp(sessionUUID string, normX, normY float32, button int) {
-	st, _ := m.Store.GetSettings()
+	deskID, alias, _ := m.getCachedSettings()
 	m.mu.Lock()
 	var peerID string
 	for _, s := range m.sessions {
@@ -1110,14 +1178,14 @@ func (m *Manager) SendMouseUp(sessionUUID string, normX, normY float32, button i
 		if s.Participants == nil {
 			s.Participants = make(map[string]*RemoteCursor)
 		}
-		cur, ok := s.Participants[st.DeskID]
+		cur, ok := s.Participants[deskID]
 		if !ok {
 			cur = &RemoteCursor{
-				DeskID: st.DeskID,
-				Alias:  st.Alias,
+				DeskID: deskID,
+				Alias:  alias,
 				Color:  GetCursorColor(len(s.Participants)),
 			}
-			s.Participants[st.DeskID] = cur
+			s.Participants[deskID] = cur
 		}
 		cur.NormX = normX
 		cur.NormY = normY
@@ -1132,13 +1200,13 @@ func (m *Manager) SendMouseUp(sessionUUID string, normX, normY float32, button i
 			"norm_x": normX,
 			"norm_y": normY,
 			"button": button,
-			"alias":  st.Alias,
+			"alias":  alias,
 		})
 		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "mouse_up",
 			SessionUUID: sessionUUID,
-			FromDeskID:  st.DeskID,
-			FromAlias:   st.Alias,
+			FromDeskID:  deskID,
+			FromAlias:   alias,
 			ToDeskID:    peerID,
 			Payload:     string(payload),
 			Timestamp:   time.Now().Format("15:04:05"),

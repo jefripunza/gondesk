@@ -1,6 +1,7 @@
 package uiapp
 
 import (
+	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -61,7 +62,9 @@ func (a *AppUI) UpdateHostOverlay() {
 			Content:       ui.View(a.renderHostOverlay),
 		})
 		win.SetIgnoreMouseEvents(true)
-		win.SetContentProtection(true)
+		if runtime.GOOS != "linux" {
+			win.SetContentProtection(true)
+		}
 		a.HostOverlayWin = win
 	} else {
 		a.HostOverlayWin.Invalidate()
@@ -112,7 +115,7 @@ func (a *AppUI) renderHostOverlay(c *ui.Context) {
 				tagW, _ := p.MeasureText(0, ui.Span{Text: tag, Size: 11})
 				badgeW := tagW + 14
 				badgeH := float32(20)
-				badgeX := cx + 14
+				badgeX := cx + 16
 				badgeY := cy + 14
 				p.Fill(ui.Rect{X: badgeX, Y: badgeY, W: badgeW, H: badgeH}, curColor, 4)
 				p.Text(badgeX + 7, badgeY + 4.5, tag, 11, ui.Hex("#FFFFFF"))

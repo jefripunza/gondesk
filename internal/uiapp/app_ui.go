@@ -133,11 +133,14 @@ func (a *AppUI) NotifyChanged() {
 			norm := database.NormalizeDeskID(s.PeerDeskID)
 			if sw, ok := a.ActiveWindows[norm]; ok {
 				sw.Status = s.Status
+				if s.SessionUUID != "" {
+					sw.SessionUUID = s.SessionUUID
+				}
 				if s.ErrorMessage != "" {
 					sw.ErrorMessage = s.ErrorMessage
 				}
 				if sw.Win != nil {
-					sw.Win.Update(func() {})
+					sw.Win.Invalidate()
 				}
 			}
 		}

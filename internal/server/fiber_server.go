@@ -333,22 +333,20 @@ func (n *UnifiedNode) registerRoutes() {
 				_ = n.Store.RecordSession(msg.SessionUUID, msg.FromDeskID, msg.ToDeskID, "Single-Port HTTPS/WSS + TURNS", "completed", "Session ended")
 			}
 
-			// Check if target is a connected WebSocket peer on this bridge
+			// Check if target is this local Desktop instance itself (Direct connection or loopback)
 			handled := false
-			if msg.ToDeskID != "" {
-				if n.SendSignalToPeer(msg) {
+			localSettings, err := n.Store.GetSettings()
+			if err == nil && (database.NormalizeDeskID(msg.ToDeskID) == database.NormalizeDeskID(localSettings.DeskID) || msg.ToDeskID == "local") {
+				if n.Cfg.ShowDesktopFeatures() && n.localHandler != nil {
+					n.localHandler(msg)
 					handled = true
 				}
 			}
 
-			// Check if target is this local Desktop instance itself (Direct connection or loopback)
-			if !handled {
-				localSettings, err := n.Store.GetSettings()
-				if err == nil && (database.NormalizeDeskID(msg.ToDeskID) == database.NormalizeDeskID(localSettings.DeskID) || msg.ToDeskID == "local") {
-					if n.Cfg.ShowDesktopFeatures() && n.localHandler != nil {
-						n.localHandler(msg)
-						handled = true
-					}
+			// If not local host, check if target is a connected WebSocket peer on this bridge
+			if !handled && msg.ToDeskID != "" {
+				if n.SendSignalToPeer(msg) {
+					handled = true
 				}
 			}
 
