@@ -195,6 +195,45 @@ func TestManagerMultiCursorDynamic(t *testing.T) {
 	if u2 == nil || u2.LastAction != "click" {
 		t.Fatalf("expected User-2 to have click action; got: %v", u2)
 	}
+
+	// Send mouse_up from User-2
+	mgr.HandleSignal(server.SignalMessage{
+		Type:        "mouse_up",
+		SessionUUID: "session-multicursor",
+		FromDeskID:  "222 333 444",
+		FromAlias:   "User-2",
+		Payload:     `{"norm_x":0.45,"norm_y":0.55,"button":0,"alias":"User-2"}`,
+	})
+
+	_, _, _, _, sessionsAfterUp := mgr.Snapshot()
+	u2After := sessionsAfterUp[0].Participants["222 333 444"]
+	if u2After == nil || u2After.LastAction != "up" {
+		t.Fatalf("expected User-2 to have up action; got: %v", u2After)
+	}
+}
+
+func TestManagerSendMouseUp(t *testing.T) {
+	mgr, store := setupTestManager(t)
+	st, _ := store.GetSettings()
+
+	sess, err := mgr.ConnectToPeer("888 777 666", "")
+	if err != nil {
+		t.Fatalf("ConnectToPeer: %v", err)
+	}
+
+	mgr.SendMouseClick(sess.SessionUUID, 0.4, 0.4, 0)
+	_, _, _, _, sClick := mgr.Snapshot()
+	cur := sClick[0].Participants[st.DeskID]
+	if cur == nil || cur.LastAction != "click" {
+		t.Fatalf("expected self cursor to be in click state; got: %v", cur)
+	}
+
+	mgr.SendMouseUp(sess.SessionUUID, 0.4, 0.4, 0)
+	_, _, _, _, sUp := mgr.Snapshot()
+	curUp := sUp[0].Participants[st.DeskID]
+	if curUp == nil || curUp.LastAction != "up" {
+		t.Fatalf("expected self cursor to transition to up state; got: %v", curUp)
+	}
 }
 
 func TestManagerClipboardAndFileTransfer(t *testing.T) {

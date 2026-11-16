@@ -1,6 +1,8 @@
 package uiapp
 
 import (
+	"time"
+
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -108,11 +110,15 @@ func (a *AppUI) renderHostOverlay(c *ui.Context) {
 					tag = cur.DeskID
 				}
 				tagW, _ := p.MeasureText(0, ui.Span{Text: tag, Size: 11})
-				p.Fill(ui.Rect{X: cx + 14, Y: cy - 4, W: tagW + 14, H: 20}, curColor, 4)
-				p.Text(cx + 21, cy + 11, tag, 11, ui.Hex("#FFFFFF"))
+				badgeW := tagW + 14
+				badgeH := float32(20)
+				badgeX := cx + 14
+				badgeY := cy + 14
+				p.Fill(ui.Rect{X: badgeX, Y: badgeY, W: badgeW, H: badgeH}, curColor, 4)
+				p.Text(badgeX + 7, badgeY + 4.5, tag, 11, ui.Hex("#FFFFFF"))
 
-				// If click was triggered, draw ripple indicator
-				if cur.LastAction == "click" {
+				// If click was triggered, draw ripple indicator (expires on mouse up or after 400ms)
+				if cur.LastAction == "click" && time.Since(cur.UpdatedAt) < 400*time.Millisecond {
 					ripple := (&ui.Path{}).Circle(cx, cy, 14)
 					p.StrokePath(ripple, 2, curColor)
 				}

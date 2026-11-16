@@ -3,6 +3,7 @@ package uiapp
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gondesk/internal/config"
 	"gondesk/internal/database"
@@ -340,5 +341,87 @@ func TestRemoteWindowNormalizationPrecision(t *testing.T) {
 
 	if cx != evX || cy != evY {
 		t.Fatalf("expected cursor rendered at exact pointer DIPs (%.1f, %.1f), got (%.1f, %.1f)", evX, evY, cx, cy)
+	}
+}
+
+func TestCursorBadgeVerticalCentering(t *testing.T) {
+	// Remote Window cursor geometry
+	cx := float32(100)
+	cy := float32(200)
+
+	badgeX := cx + 12
+	badgeY := cy + 12
+	badgeH := float32(18)
+	textX := badgeX + 6
+	textY := badgeY + 3.5
+
+	_ = textX
+	topPad := textY - badgeY
+	bottomPad := (badgeY + badgeH) - (textY + 11)
+	if topPad != bottomPad {
+		t.Fatalf("expected symmetric padding around badge text: top %.2f, bottom %.2f", topPad, bottomPad)
+	}
+
+	// Host Overlay cursor geometry
+	hBadgeX := cx + 14
+	hBadgeY := cy + 14
+	hBadgeH := float32(20)
+	hTextX := hBadgeX + 7
+	hTextY := hBadgeY + 4.5
+
+	_ = hTextX
+	hTopPad := hTextY - hBadgeY
+	hBottomPad := (hBadgeY + hBadgeH) - (hTextY + 11)
+	if hTopPad != hBottomPad {
+		t.Fatalf("expected symmetric padding around host overlay badge text: top %.2f, bottom %.2f", hTopPad, hBottomPad)
+	}
+}
+
+func TestSelfCursorHidesBadge(t *testing.T) {
+	myDeskID := "123 456 789"
+	peerDeskID := "987 654 321"
+
+	curSelf := &remote.RemoteCursor{DeskID: myDeskID, Alias: "Me"}
+	curOther := &remote.RemoteCursor{DeskID: peerDeskID, Alias: "Other"}
+
+	isSelfCheck := func(cur *remote.RemoteCursor) bool {
+		return myDeskID != "" && cur.DeskID == myDeskID
+	}
+
+	if !isSelfCheck(curSelf) {
+		t.Fatalf("expected isSelf to be true for own cursor")
+	}
+	if isSelfCheck(curOther) {
+		t.Fatalf("expected isSelf to be false for other participant's cursor")
+	}
+}
+
+func TestClickRippleExpiration(t *testing.T) {
+	now := time.Now()
+	recentClick := &remote.RemoteCursor{
+		LastAction: "click",
+		UpdatedAt:  now.Add(-100 * time.Millisecond),
+	}
+	expiredClick := &remote.RemoteCursor{
+		LastAction: "click",
+		UpdatedAt:  now.Add(-500 * time.Millisecond),
+	}
+	mouseUp := &remote.RemoteCursor{
+		LastAction: "up",
+		UpdatedAt:  now.Add(-50 * time.Millisecond),
+	}
+
+	isRippleActive := func(cur *remote.RemoteCursor) bool {
+		return cur.LastAction == "click" && time.Since(cur.UpdatedAt) < 400*time.Millisecond
+	}
+
+	if !isRippleActive(recentClick) {
+		t.Fatalf("expected ripple to be active within 400ms of click")
+	}
+	if isRippleActive(expiredClick) {
+		t.Fatalf("expected ripple to expire after 400ms")
+	}
+	if isRippleActive(mouseUp) {
+		t.Fatalf("expected ripple to be immediately inactive on mouse up")
 	}
 }

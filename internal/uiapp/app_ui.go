@@ -142,7 +142,27 @@ func (a *AppUI) NotifyChanged() {
 		a.Win.Update(func() {
 			a.ReloadFromDB()
 			a.UpdateHostOverlay()
+			a.checkWindowsScreenCaptureDialog()
 		})
+	}
+}
+
+func (a *AppUI) checkWindowsScreenCaptureDialog() {
+	if a.Manager == nil || a.Manager.ScreenEngine() == nil {
+		return
+	}
+	if a.Manager.ScreenEngine().NeedsWindowsDialog() {
+		a.Manager.ScreenEngine().SetWindowsDialogShown()
+		go func() {
+			res, _ := mygo.Dialog.Message(mygo.MessageOptions{
+				Parent:  a.Win,
+				Type:    mygo.MessageQuestion,
+				Message: "Komponen Screen Capture Diperlukan",
+				Detail:  "Windows memerlukan izin atau komponen pendukung untuk penangkapan layar desktop. Pasang sekarang?",
+				Buttons: []string{"Pasang Sekarang", "Batal"},
+			})
+			_ = res
+		}()
 	}
 }
 

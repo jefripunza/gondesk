@@ -353,7 +353,7 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 			m.notify()
 		}
 
-	case "mouse_move", "mouse_click":
+	case "mouse_move", "mouse_click", "mouse_up":
 		var ev struct {
 			NormX  float32 `json:"norm_x"`
 			NormY  float32 `json:"norm_y"`
@@ -389,11 +389,15 @@ func (m *Manager) HandleSignal(msg server.SignalMessage) {
 			cur.NormY = ev.NormY
 			cur.Alias = ev.Alias
 			cur.UpdatedAt = time.Now()
-			if msg.Type == "mouse_click" {
+			switch msg.Type {
+			case "mouse_click":
 				cur.LastAction = "click"
 				s.LastInput = fmt.Sprintf("Remote Click (%s)", ev.Alias)
 				s.FrameTick++
-			} else {
+			case "mouse_up":
+				cur.LastAction = "up"
+				s.FrameTick++
+			default:
 				cur.LastAction = "move"
 			}
 
@@ -1070,6 +1074,56 @@ func (m *Manager) SendMouseClick(sessionUUID string, normX, normY float32, butto
 		})
 		m.sendSessionSignal(sessionUUID, server.SignalMessage{
 			Type:        "mouse_click",
+			SessionUUID: sessionUUID,
+			FromDeskID:  st.DeskID,
+			FromAlias:   st.Alias,
+			ToDeskID:    peerID,
+			Payload:     string(payload),
+			Timestamp:   time.Now().Format("15:04:05"),
+		})
+	}
+	m.notify()
+}
+
+// SendMouseUp broadcasts a normalized mouse button release event to clear click ripple.
+func (m *Manager) SendMouseUp(sessionUUID string, normX, normY float32, button int) {
+	st, _ := m.Store.GetSettings()
+	m.mu.Lock()
+	var peerID string
+	for _, s := range m.sessions {
+		if s.SessionUUID != sessionUUID {
+			continue
+		}
+		peerID = s.PeerDeskID
+		if s.Participants == nil {
+			s.Participants = make(map[string]*RemoteCursor)
+		}
+		cur, ok := s.Participants[st.DeskID]
+		if !ok {
+			cur = &RemoteCursor{
+				DeskID: st.DeskID,
+				Alias:  st.Alias,
+				Color:  GetCursorColor(len(s.Participants)),
+			}
+			s.Participants[st.DeskID] = cur
+		}
+		cur.NormX = normX
+		cur.NormY = normY
+		cur.LastAction = "up"
+		cur.UpdatedAt = time.Now()
+		s.FrameTick++
+	}
+	m.mu.Unlock()
+
+	if peerID != "" {
+		payload, _ := json.Marshal(map[string]any{
+			"norm_x": normX,
+			"norm_y": normY,
+			"button": button,
+			"alias":  st.Alias,
+		})
+		m.sendSessionSignal(sessionUUID, server.SignalMessage{
+			Type:        "mouse_up",
 			SessionUUID: sessionUUID,
 			FromDeskID:  st.DeskID,
 			FromAlias:   st.Alias,

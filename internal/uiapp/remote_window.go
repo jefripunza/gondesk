@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gondesk/internal/database"
 	"gondesk/internal/remote"
@@ -221,6 +222,11 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 					if sw.Win != nil {
 						sw.Win.Invalidate()
 					}
+				case ui.InputPointerUp:
+					a.Manager.SendMouseUp(sw.SessionUUID, normX, normY, ev.Button)
+					if sw.Win != nil {
+						sw.Win.Invalidate()
+					}
 				}
 			}
 			return true
@@ -244,6 +250,7 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 
 			// 2. Draw all collaborative remote participant cursors (N users dynamically)
 			if activeSess != nil && activeSess.Participants != nil {
+				st, _ := a.Store.GetSettings()
 				for _, cur := range activeSess.Participants {
 					if cur == nil {
 						continue
@@ -276,17 +283,24 @@ func (a *AppUI) RenderRemoteWindow(c *ui.Context, normDeskID string) {
 					p.FillPath(arrow, curColor)
 					p.StrokePath(arrow, 1, ui.Hex("#FFFFFF"))
 
-					// Draw participant alias / ID tag badge
-					tag := cur.Alias
-					if tag == "" {
-						tag = cur.DeskID
+					// If not self, draw participant alias / ID tag badge (self only has the clean arrow)
+					isSelf := (st.DeskID != "" && cur.DeskID == st.DeskID)
+					if !isSelf {
+						tag := cur.Alias
+						if tag == "" {
+							tag = cur.DeskID
+						}
+						tagW, _ := p.MeasureText(0, ui.Span{Text: tag, Size: 11})
+						badgeW := tagW + 12
+						badgeH := float32(18)
+						badgeX := cx + 12
+						badgeY := cy + 12
+						p.Fill(ui.Rect{X: badgeX, Y: badgeY, W: badgeW, H: badgeH}, curColor, 4)
+						p.Text(badgeX + 6, badgeY + 3.5, tag, 11, ui.Hex("#FFFFFF"))
 					}
-					tagW, _ := p.MeasureText(0, ui.Span{Text: tag, Size: 11})
-					p.Fill(ui.Rect{X: cx + 12, Y: cy - 4, W: tagW + 12, H: 18}, curColor, 4)
-					p.Text(cx + 18, cy + 10, tag, 11, ui.Hex("#FFFFFF"))
 
-					// If click was triggered, draw click ripple
-					if cur.LastAction == "click" {
+					// If click was triggered, draw click ripple (expires on mouse up or after 400ms)
+					if cur.LastAction == "click" && time.Since(cur.UpdatedAt) < 400*time.Millisecond {
 						ripple := (&ui.Path{}).Circle(cx, cy, 9)
 						p.StrokePath(ripple, 1.5, curColor)
 					}
